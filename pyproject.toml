@@ -1,7 +1,7 @@
 [project]
 name = "boogle"
 version = "0.1.0"
-description = "Add your description here"
+description = "Boogle is an open-source meta search engine for free books."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
