@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Local SQLite cache
+data/boogle.db
