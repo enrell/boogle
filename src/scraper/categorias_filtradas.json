@@ -1,0 +1,1354 @@
+[
+    {
+        "nome": "Adventure",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/82"
+    },
+    {
+        "nome": "Africa",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/5"
+    },
+    {
+        "nome": "African American Writers",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/6"
+    },
+    {
+        "nome": "Ainslee's",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/195"
+    },
+    {
+        "nome": "American Revolutionary War",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/196"
+    },
+    {
+        "nome": "Anarchism",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/7"
+    },
+    {
+        "nome": "Animal",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/150"
+    },
+    {
+        "nome": "Animals-Domestic",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/151"
+    },
+    {
+        "nome": "Animals-Wild-Birds",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/154"
+    },
+    {
+        "nome": "Animals-Wild-Insects",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/155"
+    },
+    {
+        "nome": "Animals-Wild-Mammals",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/156"
+    },
+    {
+        "nome": "Animals-Wild-Reptiles and Amphibians",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/157"
+    },
+    {
+        "nome": "Animals-Wild-Trapping",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/153"
+    },
+    {
+        "nome": "Animals-Wild",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/152"
+    },
+    {
+        "nome": "Anthropology",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/8"
+    },
+    {
+        "nome": "Archaeology",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/9"
+    },
+    {
+        "nome": "Architecture",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/10"
+    },
+    {
+        "nome": "Argentina",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/112"
+    },
+    {
+        "nome": "Armour's Monthly Cook Book",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/197"
+    },
+    {
+        "nome": "Art",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/11"
+    },
+    {
+        "nome": "Arthurian Legends",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/160"
+    },
+    {
+        "nome": "Astounding Stories",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/198"
+    },
+    {
+        "nome": "Astronomy",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/101"
+    },
+    {
+        "nome": "Atheism",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/199"
+    },
+    {
+        "nome": "Australia",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/113"
+    },
+    {
+        "nome": "BahÃ¡'Ã­ Faith",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/114"
+    },
+    {
+        "nome": "Banned Books List from the American Library Association",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/422"
+    },
+    {
+        "nome": "Banned Books from Anne Haight's list",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/336"
+    },
+    {
+        "nome": "BarnavÃ¤nnen",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/200"
+    },
+    {
+        "nome": "Bestsellers, American, 1895-1923",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/159"
+    },
+    {
+        "nome": "Best Books Ever Listings",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/13"
+    },
+    {
+        "nome": "Best Loved Spanish Literary Classics",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/420"
+    },
+    {
+        "nome": "Bibliomania",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/15"
+    },
+    {
+        "nome": "Biographies",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/16"
+    },
+    {
+        "nome": "Biology",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/201"
+    },
+    {
+        "nome": "Bird-Lore",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/202"
+    },
+    {
+        "nome": "Birds, Illustrated by Color Photography",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/203"
+    },
+    {
+        "nome": "Blackwood's Edinburgh Magazine",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/204"
+    },
+    {
+        "nome": "Boer War",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/137"
+    },
+    {
+        "nome": "Botany",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/115"
+    },
+    {
+        "nome": "British Law",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/205"
+    },
+    {
+        "nome": "Buchanan's Journal of Man",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/206"
+    },
+    {
+        "nome": "Buddhism",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/116"
+    },
+    {
+        "nome": "Bulgaria",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/117"
+    },
+    {
+        "nome": "Bulletin de Lille",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/207"
+    },
+    {
+        "nome": "CIA World Factbooks",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/181"
+    },
+    {
+        "nome": "Camping",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/148"
+    },
+    {
+        "nome": "Canada",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/118"
+    },
+    {
+        "nome": "Canon Law",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/208"
+    },
+    {
+        "nome": "Celtic Magazine",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/209"
+    },
+    {
+        "nome": "Chambers's Edinburgh Journal",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/210"
+    },
+    {
+        "nome": "Chemistry",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/211"
+    },
+    {
+        "nome": "Child's Own Book of Great Musicians",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/212"
+    },
+    {
+        "nome": "Children's Anthologies",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/213"
+    },
+    {
+        "nome": "Children's Biography",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/214"
+    },
+    {
+        "nome": "Children's Book Series",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/17"
+    },
+    {
+        "nome": "Children's Fiction",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/18"
+    },
+    {
+        "nome": "Children's History",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/19"
+    },
+    {
+        "nome": "Children's Instructional Books",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/215"
+    },
+    {
+        "nome": "Children's Literature",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/20"
+    },
+    {
+        "nome": "Children's Myths, Fairy Tales, etc.",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/216"
+    },
+    {
+        "nome": "Children's Picture Books",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/22"
+    },
+    {
+        "nome": "Children's Religion",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/217"
+    },
+    {
+        "nome": "Children's Verse",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/218"
+    },
+    {
+        "nome": "Christianity",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/119"
+    },
+    {
+        "nome": "Christmas",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/23"
+    },
+    {
+        "nome": "Classical Antiquity",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/24"
+    },
+    {
+        "nome": "Contemporary Reviews",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/25"
+    },
+    {
+        "nome": "Continental Monthly",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/219"
+    },
+    {
+        "nome": "Cookbooks and Cooking",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/419"
+    },
+    {
+        "nome": "Crafts",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/27"
+    },
+    {
+        "nome": "Crime Fiction",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/28"
+    },
+    {
+        "nome": "Crime Nonfiction",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/29"
+    },
+    {
+        "nome": "Current History",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/220"
+    },
+    {
+        "nome": "Czech",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/120"
+    },
+    {
+        "nome": "Detective Fiction",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/30"
+    },
+    {
+        "nome": "Dew Drops",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/222"
+    },
+    {
+        "nome": "De Aarde en haar Volken",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/221"
+    },
+    {
+        "nome": "Donahoe's Magazine",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/223"
+    },
+    {
+        "nome": "Early English Text Society",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/31"
+    },
+    {
+        "nome": "Ecology",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/224"
+    },
+    {
+        "nome": "Education",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/138"
+    },
+    {
+        "nome": "Egypt",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/121"
+    },
+    {
+        "nome": "Engineering",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/32"
+    },
+    {
+        "nome": "English Civil War",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/139"
+    },
+    {
+        "nome": "Erotic Fiction",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/33"
+    },
+    {
+        "nome": "Esperanto",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/34"
+    },
+    {
+        "nome": "French - Beaux-Arts",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/406"
+    },
+    {
+        "nome": "French - Biographie, MÃ©moires, Journal intime, Correspondance",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/382"
+    },
+    {
+        "nome": "French - Chansons",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/306"
+    },
+    {
+        "nome": "French - Chroniques",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/408"
+    },
+    {
+        "nome": "French - Contes",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/392"
+    },
+    {
+        "nome": "French - Droit et Justice",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/387"
+    },
+    {
+        "nome": "French - Education et Enseignement",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/380"
+    },
+    {
+        "nome": "French - Femmes",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/307"
+    },
+    {
+        "nome": "French - Guerres",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/390"
+    },
+    {
+        "nome": "French - Histoire",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/309"
+    },
+    {
+        "nome": "French - Humour",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/385"
+    },
+    {
+        "nome": "French - Illustrateurs",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/310"
+    },
+    {
+        "nome": "French - Jeunesse",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/311"
+    },
+    {
+        "nome": "French - Langues",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/384"
+    },
+    {
+        "nome": "French - La PremiÃ¨re Guerre Mondiale, 1914-1918",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/407"
+    },
+    {
+        "nome": "French - LittÃ©rature",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/313"
+    },
+    {
+        "nome": "French - LittÃ©rature francophone",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/337"
+    },
+    {
+        "nome": "French - Livres, Collections et Bibliophilie",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/416"
+    },
+    {
+        "nome": "French - Musique",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/315"
+    },
+    {
+        "nome": "French - MÃ©tiers et Artisanat",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/417"
+    },
+    {
+        "nome": "French - NouveautÃ©s",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/395"
+    },
+    {
+        "nome": "French - Nouvelles",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/317"
+    },
+    {
+        "nome": "French - Occultisme",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/383"
+    },
+    {
+        "nome": "French - Peinture",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/318"
+    },
+    {
+        "nome": "French - Peuples et SociÃ©tÃ©s",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/386"
+    },
+    {
+        "nome": "French - Philosophie, Religion et Morale",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/381"
+    },
+    {
+        "nome": "French - Politique",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/388"
+    },
+    {
+        "nome": "French - PoÃ©sie",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/35"
+    },
+    {
+        "nome": "French - Presse",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/319"
+    },
+    {
+        "nome": "French - Prix Nobel",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/320"
+    },
+    {
+        "nome": "French - Sciences et Techniques",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/322"
+    },
+    {
+        "nome": "French - Science fiction",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/321"
+    },
+    {
+        "nome": "French - Services publics",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/391"
+    },
+    {
+        "nome": "French - Sports et loisirs",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/393"
+    },
+    {
+        "nome": "French - SÃ©duction et libertinage",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/396"
+    },
+    {
+        "nome": "French - ThÃ©Ã¢tre",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/323"
+    },
+    {
+        "nome": "French - Villes",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/394"
+    },
+    {
+        "nome": "French - Voyages et pays",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/397"
+    },
+    {
+        "nome": "Famous Scots Series",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/400"
+    },
+    {
+        "nome": "Fantasy",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/36"
+    },
+    {
+        "nome": "Folklore",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/37"
+    },
+    {
+        "nome": "Forestry",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/145"
+    },
+    {
+        "nome": "France",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/122"
+    },
+    {
+        "nome": "Garden and Forest",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/226"
+    },
+    {
+        "nome": "General Fiction",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/411"
+    },
+    {
+        "nome": "Geology",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/227"
+    },
+    {
+        "nome": "German - Drama",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/377"
+    },
+    {
+        "nome": "German - Kinderbuch",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/376"
+    },
+    {
+        "nome": "German - Lyrik",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/375"
+    },
+    {
+        "nome": "German - Prosa",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/374"
+    },
+    {
+        "nome": "German - Sachbuch",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/378"
+    },
+    {
+        "nome": "Germany",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/123"
+    },
+    {
+        "nome": "German Language Books",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/38"
+    },
+    {
+        "nome": "Godey's Lady's Book",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/228"
+    },
+    {
+        "nome": "Golden Days for Boys and Girls",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/229"
+    },
+    {
+        "nome": "Gothic Fiction",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/39"
+    },
+    {
+        "nome": "Graham's Magazine",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/230"
+    },
+    {
+        "nome": "Greece",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/124"
+    },
+    {
+        "nome": "Harper's New Monthly Magazine",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/231"
+    },
+    {
+        "nome": "Harper's Young People",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/232"
+    },
+    {
+        "nome": "Harvard Classics",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/40"
+    },
+    {
+        "nome": "Hinduism",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/125"
+    },
+    {
+        "nome": "Historical Fiction",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/41"
+    },
+    {
+        "nome": "Horror",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/42"
+    },
+    {
+        "nome": "Horticulture",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/43"
+    },
+    {
+        "nome": "Humor",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/44"
+    },
+    {
+        "nome": "Italian - Agraria",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/418"
+    },
+    {
+        "nome": "Italian - Archeologia e Storia dell'arte",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/410"
+    },
+    {
+        "nome": "Italian - Architettura",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/409"
+    },
+    {
+        "nome": "Italian - Arte varia",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/342"
+    },
+    {
+        "nome": "Italian - Biografie",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/343"
+    },
+    {
+        "nome": "Italian - Botanica",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/344"
+    },
+    {
+        "nome": "Italian - Cucina",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/345"
+    },
+    {
+        "nome": "Italian - Discorsi e Orazioni",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/346"
+    },
+    {
+        "nome": "Italian - Economia",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/347"
+    },
+    {
+        "nome": "Italian - Filosofia",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/348"
+    },
+    {
+        "nome": "Italian - Folklore",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/349"
+    },
+    {
+        "nome": "Italian - Geografia",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/350"
+    },
+    {
+        "nome": "Italian - Legge",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/351"
+    },
+    {
+        "nome": "Italian - Letteratura",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/352"
+    },
+    {
+        "nome": "Italian - Letteratura per ragazzi",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/353"
+    },
+    {
+        "nome": "Italian - Linguistica",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/354"
+    },
+    {
+        "nome": "Italian - Miscellanea",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/399"
+    },
+    {
+        "nome": "Italian - Musica",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/355"
+    },
+    {
+        "nome": "Italian - Narrativa varia",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/356"
+    },
+    {
+        "nome": "Italian - Numismatica",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/357"
+    },
+    {
+        "nome": "Italian - Poesia",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/358"
+    },
+    {
+        "nome": "Italian - Psicologia e Sociologia",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/359"
+    },
+    {
+        "nome": "Italian - Racconti",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/360"
+    },
+    {
+        "nome": "Italian - Religione e SpiritualitÃ",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/361"
+    },
+    {
+        "nome": "Italian - Romanzi",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/362"
+    },
+    {
+        "nome": "Italian - Romanzi storici",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/363"
+    },
+    {
+        "nome": "Italian - Salute",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/364"
+    },
+    {
+        "nome": "Italian - Scienza",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/365"
+    },
+    {
+        "nome": "Italian - Scienze militari",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/398"
+    },
+    {
+        "nome": "Italian - Scienze politiche",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/366"
+    },
+    {
+        "nome": "Italian - Storia",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/367"
+    },
+    {
+        "nome": "Italian - Teatro dialettale",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/368"
+    },
+    {
+        "nome": "Italian - Teatro in prosa",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/369"
+    },
+    {
+        "nome": "Italian - Teatro in versi",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/370"
+    },
+    {
+        "nome": "Italian - Tecnologia",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/371"
+    },
+    {
+        "nome": "Italian - Umorismo",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/372"
+    },
+    {
+        "nome": "Italian - Viaggi",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/373"
+    },
+    {
+        "nome": "Illustrators",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/327"
+    },
+    {
+        "nome": "India",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/45"
+    },
+    {
+        "nome": "Islam",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/126"
+    },
+    {
+        "nome": "Italy",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/127"
+    },
+    {
+        "nome": "Judaism",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/128"
+    },
+    {
+        "nome": "Journal of Entomology and Zoology",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/234"
+    },
+    {
+        "nome": "L'Illustration",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/235"
+    },
+    {
+        "nome": "Language Education",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/46"
+    },
+    {
+        "nome": "Latter Day Saints",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/404"
+    },
+    {
+        "nome": "Lippincott's Magazine",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/236"
+    },
+    {
+        "nome": "Little Folks",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/237"
+    },
+    {
+        "nome": "London Medical Gazette",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/414"
+    },
+    {
+        "nome": "Love",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/47"
+    },
+    {
+        "nome": "Manufacturing",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/146"
+    },
+    {
+        "nome": "Maps and Cartography",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/415"
+    },
+    {
+        "nome": "Masterpieces in Colour",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/402"
+    },
+    {
+        "nome": "Mathematics",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/102"
+    },
+    {
+        "nome": "McClure's Magazine",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/239"
+    },
+    {
+        "nome": "Medicine",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/48"
+    },
+    {
+        "nome": "MediÃ¦val Town Series",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/401"
+    },
+    {
+        "nome": "Microbiology",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/105"
+    },
+    {
+        "nome": "Microscopy",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/109"
+    },
+    {
+        "nome": "Mother Earth",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/240"
+    },
+    {
+        "nome": "Movie Books",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/49"
+    },
+    {
+        "nome": "Mrs Whittelsey's Magazine for Mothers and Daughters",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/241"
+    },
+    {
+        "nome": "Music",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/50"
+    },
+    {
+        "nome": "Mycology",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/129"
+    },
+    {
+        "nome": "Mystery Fiction",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/51"
+    },
+    {
+        "nome": "Mythology",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/52"
+    },
+    {
+        "nome": "Napoleonic Era",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/149"
+    },
+    {
+        "nome": "Native America",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/53"
+    },
+    {
+        "nome": "Natural History",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/54"
+    },
+    {
+        "nome": "New Zealand",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/130"
+    },
+    {
+        "nome": "Northern Nut Growers Association",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/244"
+    },
+    {
+        "nome": "Norway",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/131"
+    },
+    {
+        "nome": "Notes and Queries",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/245"
+    },
+    {
+        "nome": "Noteworthy Trials",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/246"
+    },
+    {
+        "nome": "One Act Plays",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/55"
+    },
+    {
+        "nome": "Opera",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/56"
+    },
+    {
+        "nome": "Our Young Folks",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/247"
+    },
+    {
+        "nome": "Portuguese - Arte",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/88"
+    },
+    {
+        "nome": "Portuguese - Biografia",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/89"
+    },
+    {
+        "nome": "Portuguese - CiÃªncia e TÃ©cnica",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/90"
+    },
+    {
+        "nome": "Portuguese - Contos",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/91"
+    },
+    {
+        "nome": "Portuguese - HistÃ³ria",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/92"
+    },
+    {
+        "nome": "Portuguese - Infantil e Juvenil",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/93"
+    },
+    {
+        "nome": "Portuguese - LÃ­ngua Portuguesa",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/94"
+    },
+    {
+        "nome": "Portuguese - NavegaÃ§Ãµes e ExploraÃ§Ãµes",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/95"
+    },
+    {
+        "nome": "Portuguese - PeriÃ³dicos",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/96"
+    },
+    {
+        "nome": "Portuguese - Poesia",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/97"
+    },
+    {
+        "nome": "Portuguese - PolÃ­tica e Sociedade",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/98"
+    },
+    {
+        "nome": "Portuguese - Romance",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/99"
+    },
+    {
+        "nome": "Portuguese - Teatro",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/100"
+    },
+    {
+        "nome": "Paganism",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/132"
+    },
+    {
+        "nome": "Philosophy",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/57"
+    },
+    {
+        "nome": "Photography",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/158"
+    },
+    {
+        "nome": "Physics",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/103"
+    },
+    {
+        "nome": "Physiology",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/110"
+    },
+    {
+        "nome": "Pirates, Buccaneers, Corsairs, etc.",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/58"
+    },
+    {
+        "nome": "Plays",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/59"
+    },
+    {
+        "nome": "Poetry, A Magazine of Verse",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/248"
+    },
+    {
+        "nome": "Poetry",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/60"
+    },
+    {
+        "nome": "Politics",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/61"
+    },
+    {
+        "nome": "Popular Science Monthly",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/249"
+    },
+    {
+        "nome": "Prairie Farmer",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/250"
+    },
+    {
+        "nome": "Precursors of Science Fiction",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/62"
+    },
+    {
+        "nome": "Project Gutenberg",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/63"
+    },
+    {
+        "nome": "Psychology",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/64"
+    },
+    {
+        "nome": "Punch",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/252"
+    },
+    {
+        "nome": "Punchinello",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/253"
+    },
+    {
+        "nome": "Racism",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/65"
+    },
+    {
+        "nome": "Reference",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/66"
+    },
+    {
+        "nome": "Romantic Fiction",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/412"
+    },
+    {
+        "nome": "School Stories",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/67"
+    },
+    {
+        "nome": "Science",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/106"
+    },
+    {
+        "nome": "Science Fiction",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/68"
+    },
+    {
+        "nome": "Science Fiction by Women",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/403"
+    },
+    {
+        "nome": "Scientific American",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/256"
+    },
+    {
+        "nome": "Scouts",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/144"
+    },
+    {
+        "nome": "Scribner's Magazine",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/257"
+    },
+    {
+        "nome": "Short Stories",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/69"
+    },
+    {
+        "nome": "Slavery",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/70"
+    },
+    {
+        "nome": "Sociology",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/134"
+    },
+    {
+        "nome": "South Africa",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/135"
+    },
+    {
+        "nome": "South America",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/71"
+    },
+    {
+        "nome": "Spanish American War",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/140"
+    },
+    {
+        "nome": "St. Nicholas Magazine for Boys and Girls",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/258"
+    },
+    {
+        "nome": "Suffrage",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/72"
+    },
+    {
+        "nome": "Technology",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/143"
+    },
+    {
+        "nome": "The Aldine",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/259"
+    },
+    {
+        "nome": "The American Architect and Building News",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/260"
+    },
+    {
+        "nome": "The American Bee Journal",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/423"
+    },
+    {
+        "nome": "The American Journal of Archaeology",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/261"
+    },
+    {
+        "nome": "The American Missionary",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/262"
+    },
+    {
+        "nome": "The American Quarterly Review",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/263"
+    },
+    {
+        "nome": "The Arena",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/264"
+    },
+    {
+        "nome": "The Argosy",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/265"
+    },
+    {
+        "nome": "The Atlantic Monthly",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/266"
+    },
+    {
+        "nome": "The Baptist Magazine",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/267"
+    },
+    {
+        "nome": "The Bay State Monthly",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/268"
+    },
+    {
+        "nome": "The Botanical Magazine",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/269"
+    },
+    {
+        "nome": "The Brochure Series of Architectural Illustration",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/270"
+    },
+    {
+        "nome": "The Catholic World",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/271"
+    },
+    {
+        "nome": "The Christian Foundation",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/272"
+    },
+    {
+        "nome": "The Church of England Magazine",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/273"
+    },
+    {
+        "nome": "The Contemporary Review",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/274"
+    },
+    {
+        "nome": "The Economist",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/275"
+    },
+    {
+        "nome": "The Esperantist",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/276"
+    },
+    {
+        "nome": "The Galaxy",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/277"
+    },
+    {
+        "nome": "The Girls Own Paper",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/278"
+    },
+    {
+        "nome": "The Great Round World And What Is Going On In It",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/279"
+    },
+    {
+        "nome": "The Haslemere Museum Gazette",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/413"
+    },
+    {
+        "nome": "The Idler",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/280"
+    },
+    {
+        "nome": "The Illustrated War News",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/281"
+    },
+    {
+        "nome": "The International Magazine of Literature, Art, and Science",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/282"
+    },
+    {
+        "nome": "The Irish Ecclesiastical Record",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/283"
+    },
+    {
+        "nome": "The Irish Penny Journal",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/284"
+    },
+    {
+        "nome": "The Journal of Negro History",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/285"
+    },
+    {
+        "nome": "The Knickerbocker",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/286"
+    },
+    {
+        "nome": "The Mayflower",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/287"
+    },
+    {
+        "nome": "The Menorah Journal",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/288"
+    },
+    {
+        "nome": "The Mentor",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/289"
+    },
+    {
+        "nome": "The Mirror of Literature, Amusement, and Instruction",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/290"
+    },
+    {
+        "nome": "The Mirror of Taste, and Dramatic Censor",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/291"
+    },
+    {
+        "nome": "The National Preacher",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/292"
+    },
+    {
+        "nome": "The North American Medical and Surgical Journal",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/293"
+    },
+    {
+        "nome": "The Nursery",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/294"
+    },
+    {
+        "nome": "The Philatelic Digital Library Project",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/73"
+    },
+    {
+        "nome": "The Scrap Book",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/295"
+    },
+    {
+        "nome": "The Speaker",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/296"
+    },
+    {
+        "nome": "The Stars and Stripes",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/297"
+    },
+    {
+        "nome": "The Strand Magazine",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/298"
+    },
+    {
+        "nome": "The Unpopular Review",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/299"
+    },
+    {
+        "nome": "The Writer",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/300"
+    },
+    {
+        "nome": "The Yellow Book",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/301"
+    },
+    {
+        "nome": "Transportation",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/74"
+    },
+    {
+        "nome": "Travel",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/75"
+    },
+    {
+        "nome": "US Civil War",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/141"
+    },
+    {
+        "nome": "United Kingdom",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/76"
+    },
+    {
+        "nome": "United States",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/136"
+    },
+    {
+        "nome": "United States Law",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/302"
+    },
+    {
+        "nome": "Western",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/77"
+    },
+    {
+        "nome": "Witchcraft",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/78"
+    },
+    {
+        "nome": "Women's Travel Journals",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/80"
+    },
+    {
+        "nome": "Woodwork",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/147"
+    },
+    {
+        "nome": "World War I",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/142"
+    },
+    {
+        "nome": "World War II",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/325"
+    },
+    {
+        "nome": "Zoology",
+        "url": "https://www.gutenberg.org/ebooks/bookshelf/303"
+    }
+]

@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from src.scraper.scraper import GutenbergScraper
+from src.scraper.Codigo_antigo.scraper import GutenbergScraper
 from src.db import SQLiteRepository
 
 app = FastAPI(title="Gutenberg Metadata API", version="1.0.0")
