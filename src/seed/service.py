@@ -1,10 +1,11 @@
-from typing import Dict, Optional
+from typing import Mapping, Optional
 
 from src.db import PostgresRepository
+from src.sources.types import SourceClient
 
 
 class SeedService:
-    def __init__(self, repository: PostgresRepository, sources: Dict[str, object]):
+    def __init__(self, repository: PostgresRepository, sources: Mapping[str, SourceClient]):
         self.repository = repository
         self.sources = sources
 

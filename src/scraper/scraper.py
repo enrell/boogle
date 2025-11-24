@@ -1,14 +1,14 @@
 import csv
+import re
+from typing import Dict, Iterator, List
+
 import requests
 from bs4 import BeautifulSoup
-from typing import Dict, Optional, List, Iterator
-import re
 
 
 class GutenbergScraper:
-    def __init__(self, book_id: Optional[int] = None):
+    def __init__(self):
         self.base_url = "https://www.gutenberg.org"
-        self.book_id = book_id
 
     def fetch(self, url: str) -> str:
         headers = {
@@ -21,7 +21,7 @@ class GutenbergScraper:
     def get_book_url(self, book_id: str) -> str:
         return f"{self.base_url}/ebooks/{book_id}"
 
-    def extract_metadata(self, book_id: str) -> Dict:
+    def extract_metadata(self, book_id: str) -> Dict[str, object]:
         url = self.get_book_url(book_id)
         html = self.fetch(url)
         soup = BeautifulSoup(html, 'html.parser')
@@ -93,13 +93,11 @@ class GutenbergScraper:
             for row in files_table.find_all('tr'):
                 link = row.find('a', class_='link')
                 if link:
-                    href = link.get('href', '')
+                    href_value = link.get('href') or ""
+                    href = href_value[0] if isinstance(href_value, list) else str(href_value)
                     text = link.get_text(strip=True)
                     if href:
-                        if href.startswith('http'):
-                            full_url = href
-                        else:
-                            full_url = f"{self.base_url}{href}"
+                        full_url = href if isinstance(href, str) and href.startswith('http') else f"{self.base_url}{href}"
                         metadata['files'].append({
                             'format': text,
                             'url': full_url
@@ -107,7 +105,7 @@ class GutenbergScraper:
 
         return metadata
 
-    def search_books(self, query: str, limit: int = 10) -> List[Dict]:
+    def search_books(self, query: str, limit: int = 10) -> List[Dict[str, str]]:
         search_url = f"{self.base_url}/ebooks/search/?query={query}&submit_search=Go%21"
         html = self.fetch(search_url)
         soup = BeautifulSoup(html, 'html.parser')
@@ -117,7 +115,8 @@ class GutenbergScraper:
         
         seen_ids = set()
         for link in book_links[:limit]:
-            href = link.get('href', '')
+            href_value = link.get('href') or ""
+            href = href_value[0] if isinstance(href_value, list) else str(href_value)
             match = re.search(r'/ebooks/(\d+)', href)
             if match:
                 book_id = match.group(1)
@@ -132,7 +131,7 @@ class GutenbergScraper:
         
         return results
 
-    def iter_book_ids(self, limit: Optional[int] = None) -> Iterator[str]:
+    def iter_book_ids(self, limit: int | None = None) -> Iterator[str]:
         feed_url = f"{self.base_url}/cache/epub/feeds/pg_catalog.csv"
         text = self.fetch(feed_url)
         reader = csv.DictReader(text.splitlines())

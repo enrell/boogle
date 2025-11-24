@@ -1,7 +1,10 @@
+from typing import Mapping
+
 from src.scraper.scraper import GutenbergScraper
+from src.sources.types import SourceClient
 
-sources = {"gutenberg": GutenbergScraper()}
+sources: Mapping[str, SourceClient] = {"gutenberg": GutenbergScraper()}
 
 
-def get_sources():
+def get_sources() -> Mapping[str, SourceClient]:
     return sources

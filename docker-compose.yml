@@ -29,6 +29,19 @@ services:
       SEED_SOURCE: ${SEED_SOURCE:-}
       SEED_LIMIT: ${SEED_LIMIT:-}
     command: ["uv", "run", "python", "-m", "src.seed.main"]
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_USER: boogle
+      POSTGRES_PASSWORD: boogle
+      POSTGRES_DB: boogle
+    ports:
+      - "8000:8000"
+    command: ["uv", "run", "uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 volumes:
   pgdata:

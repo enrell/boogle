@@ -88,7 +88,9 @@ def test_get_metadata_fetches_and_caches(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["title"] == "Remote Book"
-    assert repo.get_book("gutenberg", "2")["title"] == "Remote Book"
+    cached = repo.get_book("gutenberg", "2")
+    assert cached is not None
+    assert cached["title"] == "Remote Book"
     assert repo.upsert_calls[-1]["book_id"] == "2"
     assert scraper.extract_calls == ["2"]
 

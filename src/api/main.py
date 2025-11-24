@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from src.sources import get_sources
+from src.sources.types import SourceClient
 from src.db import PostgresRepository
 
 app = FastAPI(title="Boogle Metadata API", version="1.1.0")
@@ -55,7 +56,7 @@ async def root():
     return {"message": "Boogle Metadata Extraction API"}
 
 
-def get_source_client(source: str):
+def get_source_client(source: str) -> SourceClient:
     client = sources.get(source.lower())
     if not client:
         raise HTTPException(status_code=404, detail="Unsupported source")
