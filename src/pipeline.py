@@ -38,6 +38,7 @@ def index_corpus(
         if processed % 100 == 0:
             print(f"Indexed {processed}/{total_files} books, {doc_id} chunks")
     
+    index.finalize()
     index.save(index_path)
     print(f"Index saved: {doc_id} chunks from {processed} books")
     return index
