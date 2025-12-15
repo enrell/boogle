@@ -2,11 +2,11 @@ import argparse
 import json
 from pathlib import Path
 
-from rust_bm25 import parse_epubs_batch
+from rust_bm25 import process_epubs_to_index
 
 from src.downloader.downloader import EpubDownloader
 from src.scraper.scraper import GutenbergScraper
-from src.indexer.pg_bm25 import PgBM25Index
+from src.indexer.storage import IndexStorage
 
 
 def download_corpus(output_dir: str, limit: int | None = None, batch_size: int = 200, workers: int = 16):
@@ -31,8 +31,7 @@ def index_corpus(
     chunk_size: int = 1000,
     chunk_overlap: int = 100,
     fetch_metadata: bool = False,
-    flush_every: int = 20000,
-    batch_size: int = 100
+    batch_size: int = 200
 ):
     epub_dir = Path(epub_dir)
     epub_files = list(epub_dir.glob("*.epub"))
@@ -43,41 +42,63 @@ def index_corpus(
     if metadata_file.exists():
         metadata_cache = json.loads(metadata_file.read_text())
     
-    index = PgBM25Index(flush_every=flush_every)
-    index.clear()
+    storage = IndexStorage()
+    storage.clear()
     
-    doc_id = 0
+    total_docs = 0
+    total_length = 0
     processed = 0
     
     for i in range(0, total_files, batch_size):
         batch_files = epub_files[i:i + batch_size]
-        paths = [str(f) for f in batch_files]
+        paths = []
+        metadatas = []
         
-        results = parse_epubs_batch(paths, chunk_size, chunk_overlap)
-        
-        for book_id, chunks in results:
+        for f in batch_files:
+            book_id = f.stem
             if fetch_metadata and book_id not in metadata_cache:
                 metadata_cache[book_id] = _fetch_metadata(book_id)
             
             book_meta = metadata_cache.get(book_id, {'book_id': book_id})
-            
-            for chunk in chunks:
-                meta = {**book_meta, 'chunk_id': doc_id}
-                index.add_document(doc_id, chunk, json.dumps(meta))
-                doc_id += 1
-            
-            processed += 1
+            paths.append(str(f))
+            metadatas.append(json.dumps(book_meta)[:-1] + ",")
         
-        print(f"Indexed {processed}/{total_files} books, {doc_id} chunks")
+        docs, terms, batch_length = process_epubs_to_index(
+            paths, metadatas, chunk_size, chunk_overlap
+        )
+        
+        if docs:
+            adjusted_docs = [(d[0] + total_docs, d[1], d[2]) for d in docs]
+            adjusted_terms = []
+            for term, df, postings_bytes in terms:
+                from rust_bm25 import decode_postings, encode_postings
+                postings = decode_postings(postings_bytes)
+                adjusted = [(doc_id + total_docs, tf) for doc_id, tf in postings]
+                adjusted_terms.append((term, df, encode_postings(adjusted)))
+            
+            storage.insert_documents_batch(adjusted_docs)
+            storage.insert_terms_batch(adjusted_terms, merge=True)
+            
+            total_docs += len(docs)
+            total_length += batch_length
+        
+        processed += len(batch_files)
+        print(f"Indexed {processed}/{total_files} books, {total_docs} chunks")
     
     if fetch_metadata:
         metadata_file.write_text(json.dumps(metadata_cache))
     
-    index.finalize()
-    print(f"Index saved: {doc_id} chunks from {processed} books")
+    avgdl = total_length / total_docs if total_docs > 0 else 0
+    storage.set_global("num_docs", str(total_docs))
+    storage.set_global("avgdl", str(avgdl))
+    storage.set_global("k1", "1.5")
+    storage.set_global("b", "0.75")
+    
+    print(f"Index saved: {total_docs} chunks from {processed} books")
 
 
 def search(query: str, top_k: int = 10):
+    from src.indexer.pg_bm25 import PgBM25Index
     index = PgBM25Index()
     results = index.search(query, top_k)
     for doc_id, score, meta in results:
@@ -101,8 +122,7 @@ def main():
     idx_parser.add_argument('--chunk-size', type=int, default=1000)
     idx_parser.add_argument('--chunk-overlap', type=int, default=100)
     idx_parser.add_argument('--fetch-metadata', action='store_true')
-    idx_parser.add_argument('--flush-every', type=int, default=20000)
-    idx_parser.add_argument('--batch-size', type=int, default=100)
+    idx_parser.add_argument('--batch-size', type=int, default=200)
     
     search_parser = subparsers.add_parser('search')
     search_parser.add_argument('query')
@@ -115,7 +135,7 @@ def main():
     elif args.command == 'index':
         index_corpus(
             args.epub_dir, args.chunk_size, args.chunk_overlap,
-            args.fetch_metadata, args.flush_every, args.batch_size
+            args.fetch_metadata, args.batch_size
         )
     elif args.command == 'search':
         search(args.query, args.top_k)
