@@ -8,11 +8,6 @@ from src.downloader.downloader import EpubDownloader
 from src.parser.parser import EpubParser
 from src.scraper.scraper import GutenbergScraper
 
-try:
-    from rust_bm25 import BM25Index
-except ImportError:
-    from src.indexer.bm25 import BM25Index
-
 
 def download_corpus(output_dir: str, limit: int | None = None, batch_size: int = 100):
     downloader = EpubDownloader(output_dir=output_dir)
@@ -38,13 +33,32 @@ def _fetch_metadata(book_id: str) -> dict:
         return {'book_id': book_id, 'source': 'gutenberg'}
 
 
+def _get_index(backend: str, index_path: str):
+    if backend == "postgres":
+        from src.indexer.pg_bm25 import PgBM25Index
+        return PgBM25Index()
+    else:
+        from rust_bm25 import BM25Index
+        return BM25Index()
+
+
+def _load_index(backend: str, index_path: str):
+    if backend == "postgres":
+        from src.indexer.pg_bm25 import PgBM25Index
+        return PgBM25Index()
+    else:
+        from rust_bm25 import BM25Index
+        return BM25Index.load(index_path)
+
+
 def index_corpus(
     epub_dir: str,
     index_path: str,
     chunk_size: int = 1000,
     chunk_overlap: int = 100,
     workers: int = 1,
-    fetch_metadata: bool = False
+    fetch_metadata: bool = False,
+    backend: str = "file"
 ):
     epub_dir = Path(epub_dir)
     epub_files = list(epub_dir.glob("*.epub"))
@@ -55,7 +69,10 @@ def index_corpus(
     if metadata_file.exists():
         metadata_cache = json.loads(metadata_file.read_text())
     
-    index = BM25Index()
+    index = _get_index(backend, index_path)
+    if backend == "postgres":
+        index.clear()
+    
     doc_id = 0
     processed = 0
     batch_size = max(workers * 4, 50)
@@ -95,7 +112,8 @@ def index_corpus(
         print(f"Indexed {processed}/{total_files} books, {doc_id} chunks")
     
     index.finalize()
-    index.save(index_path)
+    if backend == "file":
+        index.save(index_path)
     print(f"Index saved: {doc_id} chunks from {processed} books")
     return index
 
@@ -116,11 +134,13 @@ def main():
     idx_parser.add_argument('--chunk-overlap', type=int, default=100)
     idx_parser.add_argument('--workers', type=int, default=1)
     idx_parser.add_argument('--fetch-metadata', action='store_true')
+    idx_parser.add_argument('--backend', choices=['file', 'postgres'], default='file')
     
     search_parser = subparsers.add_parser('search')
     search_parser.add_argument('query')
     search_parser.add_argument('--index-path', default='data/bm25.index')
     search_parser.add_argument('--top-k', type=int, default=10)
+    search_parser.add_argument('--backend', choices=['file', 'postgres'], default='file')
     
     args = parser.parse_args()
     
@@ -129,13 +149,14 @@ def main():
     elif args.command == 'index':
         index_corpus(
             args.epub_dir, args.index_path, args.chunk_size, 
-            args.chunk_overlap, args.workers, args.fetch_metadata
+            args.chunk_overlap, args.workers, args.fetch_metadata, args.backend
         )
     elif args.command == 'search':
-        index = BM25Index.load(args.index_path)
+        index = _load_index(args.backend, args.index_path)
         results = index.search(args.query, args.top_k)
-        for doc_id, score, meta_str in results:
-            meta = json.loads(meta_str) if meta_str else {}
+        for doc_id, score, meta in results:
+            if isinstance(meta, str):
+                meta = json.loads(meta) if meta else {}
             title = meta.get('title', 'Unknown')
             author = meta.get('author', 'Unknown')
             print(f"[{score:.4f}] {title} by {author} (book={meta.get('book_id')}, chunk={meta.get('chunk_id')})")
