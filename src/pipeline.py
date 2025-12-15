@@ -61,7 +61,7 @@ def index_corpus(
             
             book_meta = metadata_cache.get(book_id, {'book_id': book_id})
             paths.append(str(f))
-            metadatas.append(json.dumps(book_meta)[:-1] + ",")
+            metadatas.append(json.dumps(book_meta))
         
         docs, terms, batch_length = process_epubs_to_index(
             paths, metadatas, chunk_size, chunk_overlap

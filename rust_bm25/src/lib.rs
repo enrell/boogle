@@ -319,7 +319,7 @@ fn process_epubs_to_index(
                 id
             };
 
-            let meta = format!("{}\"chunk_id\":{}}}", &base_meta[..base_meta.len()-1], doc_id);
+            let meta = format!("{},\"chunk_id\":{}}}", &base_meta[..base_meta.len()-1], doc_id);
 
             {
                 let mut docs_lock = docs.lock().unwrap();
