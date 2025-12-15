@@ -1,14 +1,15 @@
 import os
-from typing import Iterator
 
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
+
+from rust_bm25 import merge_postings
 
 
 class IndexStorage:
     def __init__(self, dsn: str | None = None):
         self.dsn = dsn or self._build_dsn()
-        self.pool = ConnectionPool(self.dsn, min_size=2, max_size=10, kwargs={"row_factory": dict_row})
+        self.pool = ConnectionPool(self.dsn, min_size=4, max_size=20, kwargs={"row_factory": dict_row})
         self._init_schema()
 
     def _build_dsn(self) -> str:
@@ -71,13 +72,35 @@ class IndexStorage:
                     copy.write_row(doc)
             conn.commit()
 
-    def insert_terms_batch(self, terms: list[tuple[str, int, bytes]]):
+    def insert_terms_batch(self, terms: list[tuple[str, int, bytes]], merge: bool = False):
+        if not merge:
+            with self.pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.executemany("""
+                        INSERT INTO idx_terms (term, df, postings) VALUES (%s, %s, %s)
+                        ON CONFLICT (term) DO NOTHING
+                    """, terms)
+                conn.commit()
+            return
+        
+        term_names = [t[0] for t in terms]
+        existing = self.get_terms_batch(term_names)
+        
+        merged = []
+        for term, df, postings in terms:
+            if term in existing:
+                old_df, old_postings = existing[term]
+                new_postings = merge_postings(old_postings, postings)
+                merged.append((term, old_df + df, new_postings))
+            else:
+                merged.append((term, df, postings))
+        
         with self.pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.executemany("""
                     INSERT INTO idx_terms (term, df, postings) VALUES (%s, %s, %s)
                     ON CONFLICT (term) DO UPDATE SET df = EXCLUDED.df, postings = EXCLUDED.postings
-                """, terms)
+                """, merged)
             conn.commit()
 
     def get_document(self, doc_id: int) -> tuple[int, str] | None:

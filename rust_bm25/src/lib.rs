@@ -39,12 +39,24 @@ fn decode_postings_internal(data: &[u8]) -> Vec<(u32, u32)> {
     while pos < data.len() {
         let (delta, new_pos) = decode_varint(data, pos);
         pos = new_pos;
+        if pos >= data.len() {
+            break;
+        }
         let (tf, new_pos) = decode_varint(data, pos);
         pos = new_pos;
         doc_id += delta;
         result.push((doc_id, tf));
     }
     result
+}
+
+#[pyfunction]
+fn merge_postings(py: Python<'_>, a: &[u8], b: &[u8]) -> Py<PyBytes> {
+    let mut postings_a = decode_postings_internal(a);
+    let postings_b = decode_postings_internal(b);
+    postings_a.extend(postings_b);
+    let result = encode_postings_internal(&postings_a);
+    PyBytes::new_bound(py, &result).into()
 }
 
 #[pyfunction]
@@ -235,5 +247,6 @@ fn rust_bm25(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(analyze, m)?)?;
     m.add_function(wrap_pyfunction!(encode_postings, m)?)?;
     m.add_function(wrap_pyfunction!(decode_postings, m)?)?;
+    m.add_function(wrap_pyfunction!(merge_postings, m)?)?;
     Ok(())
 }

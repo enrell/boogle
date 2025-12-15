@@ -7,7 +7,7 @@ from src.indexer.storage import IndexStorage
 
 
 class PgBM25Index:
-    def __init__(self, storage: IndexStorage | None = None, k1: float = 1.5, b: float = 0.75, flush_every: int = 5000):
+    def __init__(self, storage: IndexStorage | None = None, k1: float = 1.5, b: float = 0.75, flush_every: int = 20000):
         self.storage = storage or IndexStorage()
         self.k1 = k1
         self.b = b
@@ -44,32 +44,22 @@ class PgBM25Index:
             self._flush()
 
     def _flush(self):
-        if not self._pending_docs:
-            return
-        
-        self.storage.insert_documents_batch(self._pending_docs)
-        self._num_docs += len(self._pending_docs)
-        self._avgdl = self._total_length / self._num_docs if self._num_docs > 0 else 0
-        self._pending_docs = []
+        if self._pending_docs:
+            self.storage.insert_documents_batch(self._pending_docs)
+            self._num_docs += len(self._pending_docs)
+            self._pending_docs = []
         
         if self._pending_terms:
-            existing = self.storage.get_terms_batch(list(self._pending_terms.keys()))
             terms_batch = []
             for term, postings in self._pending_terms.items():
-                if term in existing:
-                    old_df, old_postings = existing[term]
-                    decoded = decode_postings(old_postings)
-                    decoded.extend(postings)
-                    encoded = encode_postings(decoded)
-                    terms_batch.append((term, old_df + len(postings), encoded))
-                else:
-                    encoded = encode_postings(postings)
-                    terms_batch.append((term, len(postings), encoded))
-            self.storage.insert_terms_batch(terms_batch)
+                encoded = encode_postings(postings)
+                terms_batch.append((term, len(postings), encoded))
+            self.storage.insert_terms_batch(terms_batch, merge=True)
             self._pending_terms.clear()
 
     def finalize(self):
         self._flush()
+        self._avgdl = self._total_length / self._num_docs if self._num_docs > 0 else 0
         self.storage.set_global("num_docs", str(self._num_docs))
         self.storage.set_global("avgdl", str(self._avgdl))
         self.storage.set_global("k1", str(self.k1))
