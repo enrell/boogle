@@ -6,8 +6,12 @@ from pathlib import Path
 
 from src.downloader.downloader import EpubDownloader
 from src.parser.parser import EpubParser
-from src.indexer.bm25 import BM25Index
 from src.scraper.scraper import GutenbergScraper
+
+try:
+    from rust_bm25 import BM25Index
+except ImportError:
+    from src.indexer.bm25 import BM25Index
 
 
 def download_corpus(output_dir: str, limit: int | None = None, batch_size: int = 100):
@@ -79,7 +83,7 @@ def index_corpus(
             
             for _, chunk in results:
                 meta = {**book_meta, 'chunk_id': doc_id}
-                index.add_document(doc_id, chunk, meta)
+                index.add_document(doc_id, chunk, json.dumps(meta))
                 doc_id += 1
             processed += 1
         
@@ -130,7 +134,8 @@ def main():
     elif args.command == 'search':
         index = BM25Index.load(args.index_path)
         results = index.search(args.query, args.top_k)
-        for doc_id, score, meta in results:
+        for doc_id, score, meta_str in results:
+            meta = json.loads(meta_str) if meta_str else {}
             title = meta.get('title', 'Unknown')
             author = meta.get('author', 'Unknown')
             print(f"[{score:.4f}] {title} by {author} (book={meta.get('book_id')}, chunk={meta.get('chunk_id')})")
