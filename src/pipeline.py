@@ -1,11 +1,13 @@
 import argparse
 import gc
+import json
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from src.downloader.downloader import EpubDownloader
 from src.parser.parser import EpubParser
 from src.indexer.bm25 import BM25Index
+from src.scraper.scraper import GutenbergScraper
 
 
 def download_corpus(output_dir: str, limit: int | None = None, batch_size: int = 100):
@@ -22,16 +24,32 @@ def _process_epub(args: tuple) -> list[tuple[str, str]]:
     return [(book_id, chunk) for chunk in parser.process_epub(filepath)]
 
 
+def _fetch_metadata(book_id: str) -> dict:
+    scraper = GutenbergScraper()
+    try:
+        meta = scraper.extract_metadata(book_id)
+        del meta['files']
+        return meta
+    except Exception:
+        return {'book_id': book_id, 'source': 'gutenberg'}
+
+
 def index_corpus(
     epub_dir: str,
     index_path: str,
     chunk_size: int = 1000,
     chunk_overlap: int = 100,
-    workers: int = 1
+    workers: int = 1,
+    fetch_metadata: bool = False
 ):
     epub_dir = Path(epub_dir)
     epub_files = list(epub_dir.glob("*.epub"))
     total_files = len(epub_files)
+    
+    metadata_cache: dict[str, dict] = {}
+    metadata_file = Path(epub_dir) / "metadata.json"
+    if metadata_file.exists():
+        metadata_cache = json.loads(metadata_file.read_text())
     
     index = BM25Index()
     doc_id = 0
@@ -49,10 +67,24 @@ def index_corpus(
                 results_batch = list(executor.map(_process_epub, tasks))
         
         for results in results_batch:
-            for book_id, chunk in results:
-                index.add_document(doc_id, chunk, {'book_id': book_id, 'chunk_id': doc_id})
+            if not results:
+                processed += 1
+                continue
+            book_id = results[0][0]
+            
+            if fetch_metadata and book_id not in metadata_cache:
+                metadata_cache[book_id] = _fetch_metadata(book_id)
+            
+            book_meta = metadata_cache.get(book_id, {'book_id': book_id})
+            
+            for _, chunk in results:
+                meta = {**book_meta, 'chunk_id': doc_id}
+                index.add_document(doc_id, chunk, meta)
                 doc_id += 1
             processed += 1
+        
+        if fetch_metadata:
+            metadata_file.write_text(json.dumps(metadata_cache))
         
         del results_batch
         gc.collect()
@@ -79,6 +111,7 @@ def main():
     idx_parser.add_argument('--chunk-size', type=int, default=1000)
     idx_parser.add_argument('--chunk-overlap', type=int, default=100)
     idx_parser.add_argument('--workers', type=int, default=1)
+    idx_parser.add_argument('--fetch-metadata', action='store_true')
     
     search_parser = subparsers.add_parser('search')
     search_parser.add_argument('query')
@@ -90,12 +123,17 @@ def main():
     if args.command == 'download':
         download_corpus(args.output, args.limit, args.batch_size)
     elif args.command == 'index':
-        index_corpus(args.epub_dir, args.index_path, args.chunk_size, args.chunk_overlap, args.workers)
+        index_corpus(
+            args.epub_dir, args.index_path, args.chunk_size, 
+            args.chunk_overlap, args.workers, args.fetch_metadata
+        )
     elif args.command == 'search':
         index = BM25Index.load(args.index_path)
         results = index.search(args.query, args.top_k)
         for doc_id, score, meta in results:
-            print(f"[{score:.4f}] book={meta.get('book_id')} chunk={meta.get('chunk_id')}")
+            title = meta.get('title', 'Unknown')
+            author = meta.get('author', 'Unknown')
+            print(f"[{score:.4f}] {title} by {author} (book={meta.get('book_id')}, chunk={meta.get('chunk_id')})")
 
 
 if __name__ == '__main__':
