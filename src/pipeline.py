@@ -1,4 +1,5 @@
 import argparse
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 from src.downloader.downloader import EpubDownloader
@@ -13,30 +14,50 @@ def download_corpus(output_dir: str, limit: int | None = None, batch_size: int =
     return total
 
 
+def _process_epub(args: tuple) -> list[tuple[str, str]]:
+    filepath, chunk_size, chunk_overlap = args
+    parser = EpubParser(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    book_id = Path(filepath).stem
+    return [(book_id, chunk) for chunk in parser.process_epub(filepath)]
+
+
 def index_corpus(
     epub_dir: str,
     index_path: str,
     chunk_size: int = 1000,
-    chunk_overlap: int = 100
+    chunk_overlap: int = 100,
+    workers: int = 1
 ):
     epub_dir = Path(epub_dir)
-    parser = EpubParser(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    epub_files = list(epub_dir.glob("*.epub"))
+    total_files = len(epub_files)
+    
     index = BM25Index()
     doc_id = 0
     processed = 0
     
-    epub_files = list(epub_dir.glob("*.epub"))
-    total_files = len(epub_files)
-    
-    for i, epub_file in enumerate(epub_files):
-        book_id = epub_file.stem
-        for chunk in parser.process_epub(epub_file):
-            metadata = {'book_id': book_id, 'chunk_id': doc_id}
-            index.add_document(doc_id, chunk, metadata)
-            doc_id += 1
-        processed += 1
-        if processed % 100 == 0:
-            print(f"Indexed {processed}/{total_files} books, {doc_id} chunks")
+    if workers == 1:
+        parser = EpubParser(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        for epub_file in epub_files:
+            book_id = epub_file.stem
+            for chunk in parser.process_epub(epub_file):
+                index.add_document(doc_id, chunk, {'book_id': book_id, 'chunk_id': doc_id})
+                doc_id += 1
+            processed += 1
+            if processed % 100 == 0:
+                print(f"Indexed {processed}/{total_files} books, {doc_id} chunks")
+    else:
+        tasks = [(str(f), chunk_size, chunk_overlap) for f in epub_files]
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(_process_epub, t): t for t in tasks}
+            for future in as_completed(futures):
+                results = future.result()
+                for book_id, chunk in results:
+                    index.add_document(doc_id, chunk, {'book_id': book_id, 'chunk_id': doc_id})
+                    doc_id += 1
+                processed += 1
+                if processed % 100 == 0:
+                    print(f"Indexed {processed}/{total_files} books, {doc_id} chunks")
     
     index.finalize()
     index.save(index_path)
@@ -58,6 +79,7 @@ def main():
     idx_parser.add_argument('--index-path', default='data/bm25.index')
     idx_parser.add_argument('--chunk-size', type=int, default=1000)
     idx_parser.add_argument('--chunk-overlap', type=int, default=100)
+    idx_parser.add_argument('--workers', type=int, default=1)
     
     search_parser = subparsers.add_parser('search')
     search_parser.add_argument('query')
@@ -69,7 +91,7 @@ def main():
     if args.command == 'download':
         download_corpus(args.output, args.limit, args.batch_size)
     elif args.command == 'index':
-        index_corpus(args.epub_dir, args.index_path, args.chunk_size, args.chunk_overlap)
+        index_corpus(args.epub_dir, args.index_path, args.chunk_size, args.chunk_overlap, args.workers)
     elif args.command == 'search':
         index = BM25Index.load(args.index_path)
         results = index.search(args.query, args.top_k)
