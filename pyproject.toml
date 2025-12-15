@@ -12,7 +12,6 @@ dependencies = [
     "uvicorn>=0.38.0",
     "pytest>=9.0.1",
     "httpx>=0.28.1",
-    "ebooklib>=0.20",
     "numpy>=2.3.4",
     "maturin>=1.10.2",
 ]

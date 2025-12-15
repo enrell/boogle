@@ -1,10 +1,13 @@
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use rayon::prelude::*;
+use regex::Regex;
 use rustc_hash::FxHashMap;
+use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, Read};
+use zip::ZipArchive;
 
 #[pyfunction]
 fn analyze(text: &str) -> Vec<String> {
@@ -241,6 +244,121 @@ impl BM25Index {
     }
 }
 
+fn extract_text_from_html(html: &str) -> String {
+    let document = Html::parse_document(html);
+    let selector = Selector::parse("body").unwrap();
+    let mut text = String::new();
+    
+    if let Some(body) = document.select(&selector).next() {
+        for node in body.text() {
+            text.push_str(node);
+            text.push(' ');
+        }
+    } else {
+        for node in document.root_element().text() {
+            text.push_str(node);
+            text.push(' ');
+        }
+    }
+    
+    let whitespace = Regex::new(r"\s+").unwrap();
+    whitespace.replace_all(&text, " ").trim().to_string()
+}
+
+fn parse_epub_internal(path: &str) -> Option<String> {
+    let file = File::open(path).ok()?;
+    let reader = BufReader::new(file);
+    let mut archive = ZipArchive::new(reader).ok()?;
+    
+    let mut texts = Vec::new();
+    
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).ok()?;
+        let name = file.name().to_lowercase();
+        
+        if name.ends_with(".html") || name.ends_with(".xhtml") || name.ends_with(".htm") {
+            let mut content = String::new();
+            file.read_to_string(&mut content).ok()?;
+            let text = extract_text_from_html(&content);
+            if !text.is_empty() {
+                texts.push(text);
+            }
+        }
+    }
+    
+    Some(texts.join(" "))
+}
+
+#[pyfunction]
+fn parse_epub(path: &str) -> Option<String> {
+    parse_epub_internal(path)
+}
+
+#[pyfunction]
+fn chunk_text(text: &str, chunk_size: usize, overlap: usize) -> Vec<String> {
+    if text.len() <= chunk_size {
+        return if text.is_empty() { vec![] } else { vec![text.to_string()] };
+    }
+    
+    let mut chunks = Vec::new();
+    let bytes = text.as_bytes();
+    let mut start = 0;
+    
+    while start < bytes.len() {
+        let mut end = (start + chunk_size).min(bytes.len());
+        
+        if end < bytes.len() {
+            while end > start && bytes[end] != b' ' {
+                end -= 1;
+            }
+            if end == start {
+                end = (start + chunk_size).min(bytes.len());
+            }
+        }
+        
+        if let Ok(chunk) = std::str::from_utf8(&bytes[start..end]) {
+            let trimmed = chunk.trim();
+            if !trimmed.is_empty() {
+                chunks.push(trimmed.to_string());
+            }
+        }
+        
+        start = if end > overlap { end - overlap } else { end };
+        if start >= bytes.len() || end == bytes.len() {
+            break;
+        }
+    }
+    
+    chunks
+}
+
+#[pyfunction]
+fn parse_epub_chunks(path: &str, chunk_size: usize, overlap: usize) -> Vec<String> {
+    match parse_epub_internal(path) {
+        Some(text) => chunk_text(&text, chunk_size, overlap),
+        None => vec![],
+    }
+}
+
+#[pyfunction]
+fn parse_epubs_batch(paths: Vec<String>, chunk_size: usize, overlap: usize) -> Vec<(String, Vec<String>)> {
+    paths.into_par_iter()
+        .filter_map(|path| {
+            let book_id = std::path::Path::new(&path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
+            let chunks = parse_epub_chunks(&path, chunk_size, overlap);
+            if chunks.is_empty() {
+                None
+            } else {
+                Some((book_id, chunks))
+            }
+        })
+        .collect()
+}
+
 #[pymodule]
 fn rust_bm25(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<BM25Index>()?;
@@ -248,5 +366,9 @@ fn rust_bm25(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(encode_postings, m)?)?;
     m.add_function(wrap_pyfunction!(decode_postings, m)?)?;
     m.add_function(wrap_pyfunction!(merge_postings, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_epub, m)?)?;
+    m.add_function(wrap_pyfunction!(chunk_text, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_epub_chunks, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_epubs_batch, m)?)?;
     Ok(())
 }

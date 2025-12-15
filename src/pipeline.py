@@ -1,28 +1,19 @@
 import argparse
 import json
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from queue import Queue
-from threading import Thread
+
+from rust_bm25 import parse_epubs_batch
 
 from src.downloader.downloader import EpubDownloader
-from src.parser.parser import EpubParser
 from src.scraper.scraper import GutenbergScraper
 from src.indexer.pg_bm25 import PgBM25Index
 
 
-def download_corpus(output_dir: str, limit: int | None = None, batch_size: int = 100, workers: int = 8):
+def download_corpus(output_dir: str, limit: int | None = None, batch_size: int = 200, workers: int = 16):
     downloader = EpubDownloader(output_dir=output_dir, max_workers=workers)
     total = downloader.download_all(limit=limit, batch_size=batch_size)
     print(f"Downloaded {total} epubs")
     return total
-
-
-def _parse_epub(args: tuple) -> list[tuple[str, str]]:
-    filepath, chunk_size, chunk_overlap = args
-    parser = EpubParser(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-    book_id = Path(filepath).stem
-    return [(book_id, chunk) for chunk in parser.process_epub(filepath)]
 
 
 def _fetch_metadata(book_id: str) -> dict:
@@ -39,9 +30,9 @@ def index_corpus(
     epub_dir: str,
     chunk_size: int = 1000,
     chunk_overlap: int = 100,
-    workers: int = 4,
     fetch_metadata: bool = False,
-    flush_every: int = 5000
+    flush_every: int = 20000,
+    batch_size: int = 100
 ):
     epub_dir = Path(epub_dir)
     epub_files = list(epub_dir.glob("*.epub"))
@@ -57,46 +48,27 @@ def index_corpus(
     
     doc_id = 0
     processed = 0
-    queue: Queue = Queue(maxsize=workers * 2)
     
-    def producer():
-        tasks = [(str(f), chunk_size, chunk_overlap) for f in epub_files]
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            for result in executor.map(_parse_epub, tasks):
-                queue.put(result)
-        queue.put(None)
-    
-    producer_thread = Thread(target=producer)
-    producer_thread.start()
-    
-    while True:
-        results = queue.get()
-        if results is None:
-            break
+    for i in range(0, total_files, batch_size):
+        batch_files = epub_files[i:i + batch_size]
+        paths = [str(f) for f in batch_files]
         
-        if not results:
+        results = parse_epubs_batch(paths, chunk_size, chunk_overlap)
+        
+        for book_id, chunks in results:
+            if fetch_metadata and book_id not in metadata_cache:
+                metadata_cache[book_id] = _fetch_metadata(book_id)
+            
+            book_meta = metadata_cache.get(book_id, {'book_id': book_id})
+            
+            for chunk in chunks:
+                meta = {**book_meta, 'chunk_id': doc_id}
+                index.add_document(doc_id, chunk, json.dumps(meta))
+                doc_id += 1
+            
             processed += 1
-            continue
         
-        book_id = results[0][0]
-        
-        if fetch_metadata and book_id not in metadata_cache:
-            metadata_cache[book_id] = _fetch_metadata(book_id)
-            if processed % 100 == 0:
-                metadata_file.write_text(json.dumps(metadata_cache))
-        
-        book_meta = metadata_cache.get(book_id, {'book_id': book_id})
-        
-        for _, chunk in results:
-            meta = {**book_meta, 'chunk_id': doc_id}
-            index.add_document(doc_id, chunk, json.dumps(meta))
-            doc_id += 1
-        
-        processed += 1
-        if processed % 50 == 0:
-            print(f"Indexed {processed}/{total_files} books, {doc_id} chunks")
-    
-    producer_thread.join()
+        print(f"Indexed {processed}/{total_files} books, {doc_id} chunks")
     
     if fetch_metadata:
         metadata_file.write_text(json.dumps(metadata_cache))
@@ -121,16 +93,16 @@ def main():
     dl_parser = subparsers.add_parser('download')
     dl_parser.add_argument('--output', default='data/epubs')
     dl_parser.add_argument('--limit', type=int, default=None)
-    dl_parser.add_argument('--batch-size', type=int, default=100)
-    dl_parser.add_argument('--workers', type=int, default=8)
+    dl_parser.add_argument('--batch-size', type=int, default=200)
+    dl_parser.add_argument('--workers', type=int, default=16)
     
     idx_parser = subparsers.add_parser('index')
     idx_parser.add_argument('--epub-dir', default='data/epubs')
     idx_parser.add_argument('--chunk-size', type=int, default=1000)
     idx_parser.add_argument('--chunk-overlap', type=int, default=100)
-    idx_parser.add_argument('--workers', type=int, default=4)
     idx_parser.add_argument('--fetch-metadata', action='store_true')
-    idx_parser.add_argument('--flush-every', type=int, default=5000)
+    idx_parser.add_argument('--flush-every', type=int, default=20000)
+    idx_parser.add_argument('--batch-size', type=int, default=100)
     
     search_parser = subparsers.add_parser('search')
     search_parser.add_argument('query')
@@ -143,7 +115,7 @@ def main():
     elif args.command == 'index':
         index_corpus(
             args.epub_dir, args.chunk_size, args.chunk_overlap,
-            args.workers, args.fetch_metadata, args.flush_every
+            args.fetch_metadata, args.flush_every, args.batch_size
         )
     elif args.command == 'search':
         search(args.query, args.top_k)
