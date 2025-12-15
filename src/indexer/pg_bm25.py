@@ -7,12 +7,14 @@ from src.indexer.storage import IndexStorage
 
 
 class PgBM25Index:
-    def __init__(self, storage: IndexStorage | None = None, k1: float = 1.5, b: float = 0.75):
+    def __init__(self, storage: IndexStorage | None = None, k1: float = 1.5, b: float = 0.75, flush_every: int = 5000):
         self.storage = storage or IndexStorage()
         self.k1 = k1
         self.b = b
+        self.flush_every = flush_every
         self._pending_docs: list[tuple[int, int, str]] = []
         self._pending_terms: dict[str, list[tuple[int, int]]] = defaultdict(list)
+        self._total_length = 0
         self._num_docs = 0
         self._avgdl = 0.0
         self._load_globals()
@@ -29,6 +31,7 @@ class PgBM25Index:
         tokens = analyze(text)
         doc_length = len(tokens)
         self._pending_docs.append((doc_id, doc_length, metadata))
+        self._total_length += doc_length
         
         term_freqs: dict[str, int] = defaultdict(int)
         for token in tokens:
@@ -36,21 +39,25 @@ class PgBM25Index:
         
         for term, freq in term_freqs.items():
             self._pending_terms[term].append((doc_id, freq))
+        
+        if len(self._pending_docs) >= self.flush_every:
+            self._flush()
 
-    def finalize(self):
-        if self._pending_docs:
-            self.storage.insert_documents_batch(self._pending_docs)
-            total_length = sum(d[1] for d in self._pending_docs)
-            self._num_docs += len(self._pending_docs)
-            self._avgdl = (self._avgdl * (self._num_docs - len(self._pending_docs)) + total_length) / self._num_docs if self._num_docs > 0 else 0
-            self._pending_docs = []
-
+    def _flush(self):
+        if not self._pending_docs:
+            return
+        
+        self.storage.insert_documents_batch(self._pending_docs)
+        self._num_docs += len(self._pending_docs)
+        self._avgdl = self._total_length / self._num_docs if self._num_docs > 0 else 0
+        self._pending_docs = []
+        
         if self._pending_terms:
+            existing = self.storage.get_terms_batch(list(self._pending_terms.keys()))
             terms_batch = []
             for term, postings in self._pending_terms.items():
-                existing = self.storage.get_term(term)
-                if existing:
-                    old_df, old_postings = existing
+                if term in existing:
+                    old_df, old_postings = existing[term]
                     decoded = decode_postings(old_postings)
                     decoded.extend(postings)
                     encoded = encode_postings(decoded)
@@ -61,6 +68,8 @@ class PgBM25Index:
             self.storage.insert_terms_batch(terms_batch)
             self._pending_terms.clear()
 
+    def finalize(self):
+        self._flush()
         self.storage.set_global("num_docs", str(self._num_docs))
         self.storage.set_global("avgdl", str(self._avgdl))
         self.storage.set_global("k1", str(self.k1))
@@ -78,7 +87,7 @@ class PgBM25Index:
         tokens = analyze(query)
         terms_data = self.storage.get_terms_batch(tokens)
         
-        candidates: dict[int, float] = defaultdict(float)
+        candidates: dict[int, list[tuple[int, float]]] = defaultdict(list)
         doc_ids_needed: set[int] = set()
         
         for token in tokens:
@@ -89,34 +98,18 @@ class PgBM25Index:
             postings = decode_postings(postings_blob)
             for doc_id, tf in postings:
                 doc_ids_needed.add(doc_id)
-                candidates[doc_id] += tf * idf
+                candidates[doc_id].append((tf, idf))
         
-        doc_lengths = {}
-        doc_metadata = {}
-        for doc_id in doc_ids_needed:
-            doc = self.storage.get_document(doc_id)
-            if doc:
-                doc_lengths[doc_id], doc_metadata[doc_id] = doc
-
+        doc_data = self.storage.get_documents_batch(list(doc_ids_needed))
+        
         results = []
-        for doc_id, partial_score in candidates.items():
-            if doc_id not in doc_lengths:
+        for doc_id, tf_idf_pairs in candidates.items():
+            if doc_id not in doc_data:
                 continue
-            doc_len = doc_lengths[doc_id]
-            score = 0.0
-            for token in tokens:
-                if token not in terms_data:
-                    continue
-                df, postings_blob = terms_data[token]
-                idf = self._idf(df)
-                postings = decode_postings(postings_blob)
-                for did, tf in postings:
-                    if did == doc_id:
-                        score += self._bm25_score(tf, idf, doc_len)
-                        break
-            meta_str = doc_metadata.get(doc_id, "{}")
+            doc_len, meta_str = doc_data[doc_id]
+            score = sum(self._bm25_score(tf, idf, doc_len) for tf, idf in tf_idf_pairs)
             try:
-                meta = json.loads(meta_str)
+                meta = json.loads(meta_str) if meta_str else {}
             except:
                 meta = {}
             results.append((doc_id, score, meta))
@@ -128,6 +121,7 @@ class PgBM25Index:
         self.storage.clear()
         self._num_docs = 0
         self._avgdl = 0.0
+        self._total_length = 0
         self._pending_docs = []
         self._pending_terms.clear()
 

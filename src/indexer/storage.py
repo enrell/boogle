@@ -1,7 +1,6 @@
 import os
 from typing import Iterator
 
-from psycopg import sql
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
@@ -9,7 +8,7 @@ from psycopg_pool import ConnectionPool
 class IndexStorage:
     def __init__(self, dsn: str | None = None):
         self.dsn = dsn or self._build_dsn()
-        self.pool = ConnectionPool(self.dsn, kwargs={"row_factory": dict_row})
+        self.pool = ConnectionPool(self.dsn, min_size=2, max_size=10, kwargs={"row_factory": dict_row})
         self._init_schema()
 
     def _build_dsn(self) -> str:
@@ -67,11 +66,9 @@ class IndexStorage:
 
     def insert_documents_batch(self, docs: list[tuple[int, int, str]]):
         with self.pool.connection() as conn:
-            with conn.cursor() as cur:
-                cur.executemany("""
-                    INSERT INTO idx_documents (doc_id, length, metadata) VALUES (%s, %s, %s)
-                    ON CONFLICT (doc_id) DO UPDATE SET length = EXCLUDED.length, metadata = EXCLUDED.metadata
-                """, docs)
+            with conn.cursor().copy("COPY idx_documents (doc_id, length, metadata) FROM STDIN") as copy:
+                for doc in docs:
+                    copy.write_row(doc)
             conn.commit()
 
     def insert_terms_batch(self, terms: list[tuple[str, int, bytes]]):
@@ -90,6 +87,15 @@ class IndexStorage:
             ).fetchone()
         return (row["length"], row["metadata"]) if row else None
 
+    def get_documents_batch(self, doc_ids: list[int]) -> dict[int, tuple[int, str]]:
+        if not doc_ids:
+            return {}
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT doc_id, length, metadata FROM idx_documents WHERE doc_id = ANY(%s)", (doc_ids,)
+            ).fetchall()
+        return {row["doc_id"]: (row["length"], row["metadata"]) for row in rows}
+
     def get_term(self, term: str) -> tuple[int, bytes] | None:
         with self.pool.connection() as conn:
             row = conn.execute(
@@ -105,16 +111,6 @@ class IndexStorage:
                 "SELECT term, df, postings FROM idx_terms WHERE term = ANY(%s)", (terms,)
             ).fetchall()
         return {row["term"]: (row["df"], bytes(row["postings"])) for row in rows}
-
-    def iter_documents(self) -> Iterator[tuple[int, int, str]]:
-        with self.pool.connection() as conn:
-            for row in conn.execute("SELECT doc_id, length, metadata FROM idx_documents ORDER BY doc_id"):
-                yield row["doc_id"], row["length"], row["metadata"]
-
-    def iter_terms(self) -> Iterator[tuple[str, int, bytes]]:
-        with self.pool.connection() as conn:
-            for row in conn.execute("SELECT term, df, postings FROM idx_terms"):
-                yield row["term"], row["df"], bytes(row["postings"])
 
     def close(self):
         self.pool.close()
