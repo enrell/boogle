@@ -1,5 +1,6 @@
 import argparse
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import gc
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from src.downloader.downloader import EpubDownloader
@@ -35,29 +36,27 @@ def index_corpus(
     index = BM25Index()
     doc_id = 0
     processed = 0
+    batch_size = max(workers * 4, 50)
     
-    if workers == 1:
-        parser = EpubParser(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
-        for epub_file in epub_files:
-            book_id = epub_file.stem
-            for chunk in parser.process_epub(epub_file):
+    for i in range(0, total_files, batch_size):
+        batch = epub_files[i:i + batch_size]
+        tasks = [(str(f), chunk_size, chunk_overlap) for f in batch]
+        
+        if workers == 1:
+            results_batch = [_process_epub(t) for t in tasks]
+        else:
+            with ProcessPoolExecutor(max_workers=workers) as executor:
+                results_batch = list(executor.map(_process_epub, tasks))
+        
+        for results in results_batch:
+            for book_id, chunk in results:
                 index.add_document(doc_id, chunk, {'book_id': book_id, 'chunk_id': doc_id})
                 doc_id += 1
             processed += 1
-            if processed % 100 == 0:
-                print(f"Indexed {processed}/{total_files} books, {doc_id} chunks")
-    else:
-        tasks = [(str(f), chunk_size, chunk_overlap) for f in epub_files]
-        with ProcessPoolExecutor(max_workers=workers) as executor:
-            futures = {executor.submit(_process_epub, t): t for t in tasks}
-            for future in as_completed(futures):
-                results = future.result()
-                for book_id, chunk in results:
-                    index.add_document(doc_id, chunk, {'book_id': book_id, 'chunk_id': doc_id})
-                    doc_id += 1
-                processed += 1
-                if processed % 100 == 0:
-                    print(f"Indexed {processed}/{total_files} books, {doc_id} chunks")
+        
+        del results_batch
+        gc.collect()
+        print(f"Indexed {processed}/{total_files} books, {doc_id} chunks")
     
     index.finalize()
     index.save(index_path)
