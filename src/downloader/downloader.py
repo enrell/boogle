@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 from typing import Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -8,6 +7,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from src.scraper.scraper import GutenbergScraper
+from src.db.database import PostgresRepository
 
 
 _local = threading.local()
@@ -22,16 +22,16 @@ def _get_session() -> requests.Session:
     return _local.session
 
 
-def _fetch_metadata_fast(book_id: str) -> dict:
+def _fetch_metadata(book_id: str) -> dict:
     url = f"https://www.gutenberg.org/ebooks/{book_id}"
+    meta = {'book_id': book_id, 'source': 'gutenberg', 'url': url}
     try:
         session = _get_session()
         resp = session.get(url, timeout=15)
         if resp.status_code != 200:
-            return {'book_id': book_id, 'source': 'gutenberg'}
+            return meta
         
         soup = BeautifulSoup(resp.text, 'html.parser')
-        meta = {'book_id': book_id, 'source': 'gutenberg', 'url': url}
         
         title_elem = soup.find('td', itemprop='headline')
         if title_elem:
@@ -48,20 +48,26 @@ def _fetch_metadata_fast(book_id: str) -> dict:
                 if key == 'author':
                     link = td.find('a')
                     meta['author'] = link.get_text(strip=True) if link else td.get_text(strip=True)
+                elif key == 'illustrator':
+                    link = td.find('a')
+                    meta['illustrator'] = link.get_text(strip=True) if link else td.get_text(strip=True)
                 elif key == 'language':
                     meta['language'] = td.get_text(strip=True)
                 elif key == 'category':
                     meta['category'] = td.get_text(strip=True)
+                elif key == 'release date':
+                    meta['release_date'] = td.get_text(strip=True)
+                elif key == 'copyright status':
+                    meta['copyright_status'] = td.get_text(strip=True)
         
         return meta
     except Exception:
-        return {'book_id': book_id, 'source': 'gutenberg'}
+        return meta
 
 
-def _download_and_fetch(book_id: str, output_dir: Path, fetch_meta: bool) -> tuple[str, Path | None, dict | None]:
+def _download_and_fetch(book_id: str, output_dir: Path) -> tuple[str, Path | None, dict]:
     filepath = output_dir / f"{book_id}.epub"
     path = None
-    meta = None
     
     if not filepath.exists():
         url = f"https://www.gutenberg.org/ebooks/{book_id}.epub.noimages"
@@ -76,33 +82,27 @@ def _download_and_fetch(book_id: str, output_dir: Path, fetch_meta: bool) -> tup
     else:
         path = filepath
     
-    if fetch_meta:
-        meta = _fetch_metadata_fast(book_id)
-    
+    meta = _fetch_metadata(book_id)
     return book_id, path, meta
 
 
-class EpubDownloader:
+class EpubSeeder:
     def __init__(self, output_dir: str = "data/epubs", max_workers: int = 16):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.scraper = GutenbergScraper()
         self.max_workers = max_workers
+        self.db = PostgresRepository()
 
     def iter_all_book_ids(self, limit: int | None = None) -> Iterator[str]:
         yield from self.scraper.iter_book_ids(limit=limit)
 
-    def download_all(self, limit: int | None = None, batch_size: int = 200, fetch_metadata: bool = False) -> tuple[int, dict]:
+    def seed_all(self, limit: int | None = None, batch_size: int = 200) -> int:
         checkpoint_file = self.output_dir / ".checkpoint"
-        metadata_file = self.output_dir / "metadata.json"
         
         downloaded_ids = set()
         if checkpoint_file.exists():
             downloaded_ids = set(checkpoint_file.read_text().splitlines())
-        
-        metadata_cache = {}
-        if metadata_file.exists():
-            metadata_cache = json.loads(metadata_file.read_text())
         
         total = 0
         batch = []
@@ -113,40 +113,33 @@ class EpubDownloader:
             batch.append(book_id)
             
             if len(batch) >= batch_size:
-                results = self._process_batch(batch, fetch_metadata)
+                results = self._process_batch(batch)
                 for bid, path, meta in results:
                     if path:
                         downloaded_ids.add(bid)
                         total += 1
-                    if meta:
-                        metadata_cache[bid] = meta
+                    self.db.upsert_book(meta)
                 
                 checkpoint_file.write_text("\n".join(downloaded_ids))
-                if fetch_metadata:
-                    metadata_file.write_text(json.dumps(metadata_cache))
-                print(f"Downloaded {total} epubs")
+                print(f"Seeded {total} books")
                 batch = []
         
         if batch:
-            results = self._process_batch(batch, fetch_metadata)
+            results = self._process_batch(batch)
             for bid, path, meta in results:
                 if path:
                     downloaded_ids.add(bid)
                     total += 1
-                if meta:
-                    metadata_cache[bid] = meta
-            
+                self.db.upsert_book(meta)
             checkpoint_file.write_text("\n".join(downloaded_ids))
-            if fetch_metadata:
-                metadata_file.write_text(json.dumps(metadata_cache))
         
-        return total, metadata_cache
+        return total
 
-    def _process_batch(self, book_ids: list[str], fetch_meta: bool) -> list[tuple[str, Path | None, dict | None]]:
+    def _process_batch(self, book_ids: list[str]) -> list[tuple[str, Path | None, dict]]:
         results = []
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {
-                executor.submit(_download_and_fetch, bid, self.output_dir, fetch_meta): bid 
+                executor.submit(_download_and_fetch, bid, self.output_dir): bid 
                 for bid in book_ids
             }
             for future in as_completed(futures):

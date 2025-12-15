@@ -21,6 +21,28 @@ def get_dsn() -> str:
 def migrate():
     with psycopg.connect(get_dsn()) as conn:
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS books (
+                id BIGSERIAL PRIMARY KEY,
+                source TEXT NOT NULL,
+                book_id TEXT NOT NULL,
+                url TEXT,
+                title TEXT,
+                author TEXT,
+                illustrator TEXT,
+                release_date TEXT,
+                language TEXT,
+                category TEXT,
+                original_publication TEXT,
+                credits TEXT,
+                copyright_status TEXT,
+                downloads TEXT,
+                files JSONB NOT NULL DEFAULT '[]'::jsonb,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(source, book_id)
+            )
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS idx_documents (
                 doc_id INTEGER PRIMARY KEY,
                 length INTEGER NOT NULL,
@@ -77,25 +99,33 @@ def clear():
     with psycopg.connect(get_dsn()) as conn:
         conn.execute("TRUNCATE idx_documents, idx_terms, idx_globals")
         conn.commit()
-    print("All index data cleared")
+    print("Index data cleared")
+
+
+def clear_all():
+    with psycopg.connect(get_dsn()) as conn:
+        conn.execute("TRUNCATE books, idx_documents, idx_terms, idx_globals")
+        conn.commit()
+    print("All data cleared")
 
 
 def drop():
     with psycopg.connect(get_dsn()) as conn:
-        conn.execute("DROP TABLE IF EXISTS idx_documents, idx_terms, idx_globals CASCADE")
+        conn.execute("DROP TABLE IF EXISTS books, idx_documents, idx_terms, idx_globals CASCADE")
         conn.commit()
-    print("All index tables dropped")
+    print("All tables dropped")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Database management")
-    parser.add_argument("command", choices=["migrate", "test", "clear", "drop"])
+    parser.add_argument("command", choices=["migrate", "test", "clear", "clear-all", "drop"])
     args = parser.parse_args()
     
     commands = {
         "migrate": migrate,
         "test": test,
         "clear": clear,
+        "clear-all": clear_all,
         "drop": drop,
     }
     commands[args.command]()

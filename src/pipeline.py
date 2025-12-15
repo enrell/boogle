@@ -4,14 +4,15 @@ from pathlib import Path
 
 from rust_bm25 import process_epubs_to_index
 
-from src.downloader.downloader import EpubDownloader
+from src.downloader.downloader import EpubSeeder
 from src.indexer.storage import IndexStorage
+from src.db.database import PostgresRepository
 
 
-def download_corpus(output_dir: str, limit: int | None = None, batch_size: int = 200, workers: int = 16, fetch_metadata: bool = False):
-    downloader = EpubDownloader(output_dir=output_dir, max_workers=workers)
-    total, _ = downloader.download_all(limit=limit, batch_size=batch_size, fetch_metadata=fetch_metadata)
-    print(f"Downloaded {total} epubs")
+def seed_corpus(output_dir: str, limit: int | None = None, batch_size: int = 200, workers: int = 16):
+    seeder = EpubSeeder(output_dir=output_dir, max_workers=workers)
+    total = seeder.seed_all(limit=limit, batch_size=batch_size)
+    print(f"Seeded {total} books")
     return total
 
 
@@ -25,11 +26,7 @@ def index_corpus(
     epub_files = list(epub_dir.glob("*.epub"))
     total_files = len(epub_files)
     
-    metadata_cache: dict[str, dict] = {}
-    metadata_file = epub_dir / "metadata.json"
-    if metadata_file.exists():
-        metadata_cache = json.loads(metadata_file.read_text())
-    
+    db = PostgresRepository()
     storage = IndexStorage()
     storage.clear()
     
@@ -44,7 +41,9 @@ def index_corpus(
         
         for f in batch_files:
             book_id = f.stem
-            book_meta = metadata_cache.get(book_id, {'book_id': book_id})
+            book_meta = db.get_book('gutenberg', book_id)
+            if not book_meta:
+                book_meta = {'book_id': book_id, 'source': 'gutenberg'}
             paths.append(str(f))
             metadatas.append(json.dumps(book_meta))
         
@@ -93,12 +92,11 @@ def main():
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest='command', required=True)
     
-    dl_parser = subparsers.add_parser('download')
-    dl_parser.add_argument('--output', default='data/epubs')
-    dl_parser.add_argument('--limit', type=int, default=None)
-    dl_parser.add_argument('--batch-size', type=int, default=200)
-    dl_parser.add_argument('--workers', type=int, default=16)
-    dl_parser.add_argument('--fetch-metadata', action='store_true')
+    seed_parser = subparsers.add_parser('seed')
+    seed_parser.add_argument('--output', default='data/epubs')
+    seed_parser.add_argument('--limit', type=int, default=None)
+    seed_parser.add_argument('--batch-size', type=int, default=200)
+    seed_parser.add_argument('--workers', type=int, default=16)
     
     idx_parser = subparsers.add_parser('index')
     idx_parser.add_argument('--epub-dir', default='data/epubs')
@@ -112,8 +110,8 @@ def main():
     
     args = parser.parse_args()
     
-    if args.command == 'download':
-        download_corpus(args.output, args.limit, args.batch_size, args.workers, args.fetch_metadata)
+    if args.command == 'seed':
+        seed_corpus(args.output, args.limit, args.batch_size, args.workers)
     elif args.command == 'index':
         index_corpus(args.epub_dir, args.chunk_size, args.chunk_overlap, args.batch_size)
     elif args.command == 'search':
