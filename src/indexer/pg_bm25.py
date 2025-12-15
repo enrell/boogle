@@ -1,6 +1,7 @@
 import heapq
 import json
 import math
+from dataclasses import dataclass, field
 
 from rust_bm25 import analyze, decode_postings
 from src.indexer.storage import IndexStorage
@@ -15,6 +16,13 @@ STOPWORDS = frozenset({
     'a', 'am', 'can', 'could', 'may', 'might', 'must', 'shall', 'should',
     'need', 'dare', 'ought', 'used', 'no', 'yes'
 })
+
+
+@dataclass 
+class TermData:
+    idf: float
+    upper_bound: float
+    postings: dict[int, int] = field(default_factory=dict)
 
 
 class PgBM25Index:
@@ -42,47 +50,85 @@ class PgBM25Index:
         denominator = tf + self.k1 * (1 - self.b + self.b * doc_len / self._avgdl)
         return idf * numerator / denominator
 
+    def _bm25_upper_bound(self, idf: float) -> float:
+        return idf * (self.k1 + 1)
+
     def search(self, query: str, top_k: int = 10) -> list[tuple[int, float, dict]]:
         tokens = [t for t in analyze(query) if t not in STOPWORDS]
         if not tokens:
             return []
         
-        term_info = []
+        terms: list[TermData] = []
+        
         for token in set(tokens):
             term_data = self.storage.get_term(token)
             if term_data:
                 df, postings_blob = term_data
-                term_info.append((df, self._idf(df), decode_postings(postings_blob)))
+                idf = self._idf(df)
+                postings = {doc_id: tf for doc_id, tf in decode_postings(postings_blob)}
+                terms.append(TermData(
+                    idf=idf,
+                    upper_bound=self._bm25_upper_bound(idf),
+                    postings=postings
+                ))
         
-        if not term_info:
+        if not terms:
             return []
         
-        term_info.sort(key=lambda x: x[0])
+        terms.sort(key=lambda t: len(t.postings))
         
-        candidate_docs = set(doc_id for doc_id, _ in term_info[0][2])
-        
-        for df, idf, postings in term_info[1:]:
-            posting_docs = set(doc_id for doc_id, _ in postings)
-            candidate_docs &= posting_docs
-            if not candidate_docs:
-                candidate_docs = set(doc_id for doc_id, _ in term_info[0][2])
+        candidate_docs = set(terms[0].postings.keys())
+        for term in terms[1:]:
+            candidate_docs &= set(term.postings.keys())
+            if len(candidate_docs) <= top_k * 10:
                 break
+        
+        if not candidate_docs:
+            candidate_docs = set(terms[0].postings.keys())
+            if len(candidate_docs) > 50000:
+                scored_candidates = []
+                for doc_id in terms[0].postings:
+                    upper = sum(t.upper_bound for t in terms if doc_id in t.postings)
+                    scored_candidates.append((upper, doc_id))
+                scored_candidates.sort(reverse=True)
+                candidate_docs = set(doc_id for _, doc_id in scored_candidates[:50000])
         
         doc_data = self.storage.get_documents_batch(list(candidate_docs))
         
-        scores: dict[int, float] = {}
-        for df, idf, postings in term_info:
-            for doc_id, tf in postings:
-                if doc_id not in doc_data:
-                    continue
-                doc_len = doc_data[doc_id][0]
-                score = self._bm25_term_score(tf, idf, doc_len)
-                scores[doc_id] = scores.get(doc_id, 0.0) + score
+        top_heap: list[tuple[float, int]] = []
+        threshold = 0.0
         
-        top_docs = heapq.nlargest(top_k, scores.items(), key=lambda x: x[1])
+        candidates_with_upper = []
+        for doc_id in candidate_docs:
+            if doc_id not in doc_data:
+                continue
+            upper = sum(t.upper_bound for t in terms if doc_id in t.postings)
+            candidates_with_upper.append((upper, doc_id))
+        
+        candidates_with_upper.sort(reverse=True)
+        
+        for upper, doc_id in candidates_with_upper:
+            if upper <= threshold and len(top_heap) >= top_k:
+                break
+            
+            doc_len = doc_data[doc_id][0]
+            score = sum(
+                self._bm25_term_score(t.postings[doc_id], t.idf, doc_len)
+                for t in terms if doc_id in t.postings
+            )
+            
+            if len(top_heap) < top_k:
+                heapq.heappush(top_heap, (score, doc_id))
+                if len(top_heap) == top_k:
+                    threshold = top_heap[0][0]
+            elif score > threshold:
+                heapq.heapreplace(top_heap, (score, doc_id))
+                threshold = top_heap[0][0]
+        
+        top_heap.sort(reverse=True)
         
         results = []
-        for doc_id, score in top_docs:
+        for score, doc_id in top_heap:
             if doc_id in doc_data:
                 _, meta_str = doc_data[doc_id]
                 try:
