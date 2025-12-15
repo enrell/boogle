@@ -11,3 +11,9 @@ wheels/
 
 # Local environment files
 .env
+
+
+# Data files
+data/epubs/*.epub
+data/*.index
+data/epubs/.checkpoint
