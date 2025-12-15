@@ -5,32 +5,20 @@ from pathlib import Path
 from rust_bm25 import process_epubs_to_index
 
 from src.downloader.downloader import EpubDownloader
-from src.scraper.scraper import GutenbergScraper
 from src.indexer.storage import IndexStorage
 
 
-def download_corpus(output_dir: str, limit: int | None = None, batch_size: int = 200, workers: int = 16):
+def download_corpus(output_dir: str, limit: int | None = None, batch_size: int = 200, workers: int = 16, fetch_metadata: bool = False):
     downloader = EpubDownloader(output_dir=output_dir, max_workers=workers)
-    total = downloader.download_all(limit=limit, batch_size=batch_size)
+    total, _ = downloader.download_all(limit=limit, batch_size=batch_size, fetch_metadata=fetch_metadata)
     print(f"Downloaded {total} epubs")
     return total
-
-
-def _fetch_metadata(book_id: str) -> dict:
-    scraper = GutenbergScraper()
-    try:
-        meta = scraper.extract_metadata(book_id)
-        del meta['files']
-        return meta
-    except Exception:
-        return {'book_id': book_id, 'source': 'gutenberg'}
 
 
 def index_corpus(
     epub_dir: str,
     chunk_size: int = 1000,
     chunk_overlap: int = 100,
-    fetch_metadata: bool = False,
     batch_size: int = 200
 ):
     epub_dir = Path(epub_dir)
@@ -56,9 +44,6 @@ def index_corpus(
         
         for f in batch_files:
             book_id = f.stem
-            if fetch_metadata and book_id not in metadata_cache:
-                metadata_cache[book_id] = _fetch_metadata(book_id)
-            
             book_meta = metadata_cache.get(book_id, {'book_id': book_id})
             paths.append(str(f))
             metadatas.append(json.dumps(book_meta))
@@ -84,9 +69,6 @@ def index_corpus(
         
         processed += len(batch_files)
         print(f"Indexed {processed}/{total_files} books, {total_docs} chunks")
-    
-    if fetch_metadata:
-        metadata_file.write_text(json.dumps(metadata_cache))
     
     avgdl = total_length / total_docs if total_docs > 0 else 0
     storage.set_global("num_docs", str(total_docs))
@@ -116,12 +98,12 @@ def main():
     dl_parser.add_argument('--limit', type=int, default=None)
     dl_parser.add_argument('--batch-size', type=int, default=200)
     dl_parser.add_argument('--workers', type=int, default=16)
+    dl_parser.add_argument('--fetch-metadata', action='store_true')
     
     idx_parser = subparsers.add_parser('index')
     idx_parser.add_argument('--epub-dir', default='data/epubs')
     idx_parser.add_argument('--chunk-size', type=int, default=1000)
     idx_parser.add_argument('--chunk-overlap', type=int, default=100)
-    idx_parser.add_argument('--fetch-metadata', action='store_true')
     idx_parser.add_argument('--batch-size', type=int, default=200)
     
     search_parser = subparsers.add_parser('search')
@@ -131,12 +113,9 @@ def main():
     args = parser.parse_args()
     
     if args.command == 'download':
-        download_corpus(args.output, args.limit, args.batch_size, args.workers)
+        download_corpus(args.output, args.limit, args.batch_size, args.workers, args.fetch_metadata)
     elif args.command == 'index':
-        index_corpus(
-            args.epub_dir, args.chunk_size, args.chunk_overlap,
-            args.fetch_metadata, args.batch_size
-        )
+        index_corpus(args.epub_dir, args.chunk_size, args.chunk_overlap, args.batch_size)
     elif args.command == 'search':
         search(args.query, args.top_k)
 
