@@ -2,11 +2,30 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from src.sources import get_sources
-from src.sources.types import SourceClient
-from src.db import PostgresRepository
+from contextlib import asynccontextmanager
 
-app = FastAPI(title="Boogle Metadata API", version="1.1.0")
+from src.db.database import PostgresRepository
+from src.indexer.storage import IndexStorage
+from src.indexer.ranker import Ranker
+
+
+storage: IndexStorage | None = None
+ranker: Ranker | None = None
+database: PostgresRepository | None = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global storage, ranker, database
+    storage = IndexStorage()
+    ranker = Ranker(storage)
+    database = PostgresRepository()
+    yield
+    if storage:
+        storage.close()
+
+
+app = FastAPI(title="Boogle Search API", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -15,16 +34,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-sources = get_sources()
-database: PostgresRepository | None = None
-
-
-def get_database() -> PostgresRepository:
-    global database
-    if database is None:
-        database = PostgresRepository()
-    return database
 
 
 class BookMetadata(BaseModel):
@@ -45,82 +54,53 @@ class BookMetadata(BaseModel):
 
 
 class SearchResult(BaseModel):
-    source: str
     book_id: str
     title: str
+    author: str
+    score: float
     url: str
 
 
 @app.get("/")
 async def root():
-    return {"message": "Boogle Metadata Extraction API"}
-
-
-def get_source_client(source: str) -> SourceClient:
-    client = sources.get(source.lower())
-    if not client:
-        raise HTTPException(status_code=404, detail="Unsupported source")
-    return client
+    return {"message": "Boogle Search API"}
 
 
 @app.get("/metadata/{source}/{book_id}", response_model=BookMetadata)
 async def get_metadata(source: str, book_id: str):
     try:
-        db = get_database()
-        client = get_source_client(source)
-        cached_metadata = db.get_book(source, book_id)
+        if database is None:
+            raise HTTPException(status_code=500, detail="Database not initialized")
+        cached_metadata = database.get_book(source, book_id)
         if cached_metadata:
             return cached_metadata
-        metadata = client.extract_metadata(book_id)
-        db.upsert_book(metadata)
-        return metadata
-    except HTTPException as exc:
-        raise exc
+        raise HTTPException(status_code=404, detail="Book not found")
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error extracting metadata: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
 @app.get("/search", response_model=List[SearchResult])
-async def search_books(query: str, limit: int = 10, source: Optional[str] = None):
+async def search_books(query: str, limit: int = 10):
     try:
-        db = get_database()
-        source_key = source.lower() if source else None
-        if source_key:
-            get_source_client(source_key)
-        db_results = db.search_books(query, limit, source_key) if query else []
-        results = list(db_results)
-
-        if len(results) < limit:
-            remaining = limit - len(results)
-            remote_results = []
-            target_clients = (
-                [(source_key, get_source_client(source_key))]
-                if source_key
-                else list(sources.items())
+        if ranker is None:
+            raise HTTPException(status_code=500, detail="Search not initialized")
+        
+        results = ranker.search(query, limit)
+        
+        return [
+            SearchResult(
+                book_id=str(r.book_id),
+                title=r.title or "Unknown",
+                author=r.author or "Unknown",
+                score=r.score,
+                url=f"https://www.gutenberg.org/ebooks/{r.book_id}"
             )
-            for name, client in target_clients:
-                remote_results.extend(client.search_books(query, remaining))
-            existing_keys = {(result["source"], result["book_id"]) for result in results}
-            for result in remote_results:
-                key = (result["source"], result["book_id"])
-                if key not in existing_keys:
-                    results.append(result)
-                    existing_keys.add(key)
-            for remote in remote_results:
-                if db.get_book(remote["source"], remote["book_id"]):
-                    continue
-                try:
-                    client = get_source_client(remote["source"])
-                    metadata = client.extract_metadata(remote["book_id"])
-                    db.upsert_book(metadata)
-                except Exception:
-                    continue
-
-        return results[:limit]
-    except HTTPException as exc:
-        raise exc
+            for r in results
+        ]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error searching books: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error searching: {str(e)}")
 
 
 @app.get("/health")
