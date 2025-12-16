@@ -1,6 +1,5 @@
 import argparse
 import hashlib
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 from rust_bm25 import analyze, encode_postings, chunk_text, parse_epub, parse_pdf, parse_txt
@@ -44,30 +43,15 @@ def parse_file(path: Path) -> str | None:
     return None
 
 
-def _process_book(args: tuple[Path, int, int]) -> tuple[str, str, list[str]] | None:
-    path, chunk_size, chunk_overlap = args
-    try:
-        text = parse_file(path)
-        if not text:
-            return None
-        chunks = chunk_text(text, chunk_size, chunk_overlap)
-        if not chunks:
-            return None
-        fhash = hashlib.md5(path.read_bytes()).hexdigest()
-        return (path.stem, fhash, chunks)
-    except Exception:
-        return None
-
-
 def index_corpus(
     books_dir: str,
     chunk_size: int = 1000,
     chunk_overlap: int = 100,
     full: bool = False,
-    workers: int = 8,
 ):
     books_dir = Path(books_dir)
     book_files = list(books_dir.glob("*.epub")) + list(books_dir.glob("*.txt")) + list(books_dir.glob("*.pdf"))
+    total_files = len(book_files)
     
     storage = IndexStorage()
     
@@ -77,61 +61,60 @@ def index_corpus(
     else:
         next_chunk_id = storage.get_next_chunk_id()
     
-    to_process = []
-    skipped = 0
-    for f in book_files:
-        book_id = f.stem
-        if not full:
-            fhash = file_hash(f)
-            if storage.is_book_indexed(book_id, fhash):
-                skipped += 1
-                continue
-        to_process.append((f, chunk_size, chunk_overlap))
-    
-    print(f"Processing {len(to_process)} books ({skipped} skipped)")
-    
     indexed = 0
+    skipped = 0
     total_length = 0
     terms_batch: dict[str, list[tuple[int, int]]] = {}
     
-    with ProcessPoolExecutor(max_workers=workers) as executor:
-        futures = {executor.submit(_process_book, args): args[0] for args in to_process}
+    for idx, f in enumerate(book_files):
+        book_id = f.stem
+        fhash = file_hash(f)
         
-        for future in as_completed(futures):
-            result = future.result()
-            if not result:
-                continue
+        # Skip if already indexed with same hash
+        if not full and storage.is_book_indexed(book_id, fhash):
+            skipped += 1
+            continue
+        
+        # Parse file
+        text = parse_file(f)
+        if not text:
+            continue
+        
+        # Chunk text
+        chunks = chunk_text(text, chunk_size, chunk_overlap)
+        if not chunks:
+            continue
+        
+        # Save chunks to zstd file
+        storage.save_book_chunks(book_id, chunks)
+        
+        # Index chunks
+        chunk_records = []
+        for local_id, chunk in enumerate(chunks):
+            global_id = next_chunk_id + local_id
+            tokens = analyze(chunk)
+            total_length += len(tokens)
             
-            book_id, fhash, chunks = result
+            chunk_records.append((global_id, book_id))
             
-            storage.save_book_chunks(book_id, chunks)
+            term_freqs: dict[str, int] = {}
+            for token in tokens:
+                if token not in STOPWORDS:
+                    term_freqs[token] = term_freqs.get(token, 0) + 1
             
-            chunk_records = []
-            for local_id, chunk in enumerate(chunks):
-                global_id = next_chunk_id + local_id
-                tokens = analyze(chunk)
-                total_length += len(tokens)
-                
-                chunk_records.append((global_id, book_id))
-                
-                term_freqs: dict[str, int] = {}
-                for token in tokens:
-                    if token not in STOPWORDS:
-                        term_freqs[token] = term_freqs.get(token, 0) + 1
-                
-                for term, freq in term_freqs.items():
-                    if term not in terms_batch:
-                        terms_batch[term] = []
-                    terms_batch[term].append((global_id, freq))
-            
-            storage.insert_chunks_batch(chunk_records)
-            storage.mark_book_indexed(book_id, fhash, len(chunks))
-            
-            next_chunk_id += len(chunks)
-            indexed += 1
-            
-            if indexed % 100 == 0:
-                print(f"Indexed {indexed} books, {next_chunk_id} chunks")
+            for term, freq in term_freqs.items():
+                if term not in terms_batch:
+                    terms_batch[term] = []
+                terms_batch[term].append((global_id, freq))
+        
+        storage.insert_chunks_batch(chunk_records)
+        storage.mark_book_indexed(book_id, fhash, len(chunks))
+        
+        next_chunk_id += len(chunks)
+        indexed += 1
+        
+        if indexed % 100 == 0:
+            print(f"Indexed {indexed} books, {next_chunk_id} chunks (skipped {skipped})")
     
     # Save terms
     if terms_batch:
@@ -194,7 +177,6 @@ def main():
     idx_parser.add_argument('--chunk-size', type=int, default=1000)
     idx_parser.add_argument('--chunk-overlap', type=int, default=100)
     idx_parser.add_argument('--full', action='store_true', help='Full reindex (clear existing)')
-    idx_parser.add_argument('--workers', type=int, default=8)
     
     search_parser = subparsers.add_parser('search')
     search_parser.add_argument('query')
@@ -207,7 +189,7 @@ def main():
     elif args.command == 'update-metadata':
         update_metadata(args.output, args.batch_size, args.workers)
     elif args.command == 'index':
-        index_corpus(args.books_dir, args.chunk_size, args.chunk_overlap, args.full, args.workers)
+        index_corpus(args.books_dir, args.chunk_size, args.chunk_overlap, args.full)
     elif args.command == 'search':
         search(args.query, args.top_k)
 
