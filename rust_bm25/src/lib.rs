@@ -2,11 +2,9 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use rayon::prelude::*;
 use regex::Regex;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::collections::BinaryHeap;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read};
 use std::sync::Mutex;
@@ -99,223 +97,6 @@ fn decode_varint(data: &[u8], mut pos: usize) -> (u32, usize) {
     (result, pos)
 }
 
-struct TermInfo {
-    idf: f32,
-    upper_bound: f32,
-    postings: FxHashMap<u32, u32>,
-}
-
-#[derive(Clone, Copy)]
-struct ScoredDoc {
-    doc_id: u32,
-    score: f32,
-}
-
-impl PartialEq for ScoredDoc {
-    fn eq(&self, other: &Self) -> bool {
-        self.score == other.score
-    }
-}
-
-impl Eq for ScoredDoc {}
-
-impl PartialOrd for ScoredDoc {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for ScoredDoc {
-    fn cmp(&self, other: &Self) -> Ordering {
-        other.score.partial_cmp(&self.score).unwrap_or(Ordering::Equal)
-    }
-}
-
-#[pyclass]
-pub struct WandSearcher {
-    k1: f32,
-    b: f32,
-    num_docs: u32,
-    avgdl: f32,
-    stopwords: FxHashSet<String>,
-}
-
-#[pymethods]
-impl WandSearcher {
-    #[new]
-    #[pyo3(signature = (num_docs, avgdl, k1=1.5, b=0.75))]
-    fn new(num_docs: u32, avgdl: f32, k1: f32, b: f32) -> Self {
-        Self {
-            k1,
-            b,
-            num_docs,
-            avgdl,
-            stopwords: FxHashSet::default(),
-        }
-    }
-
-    fn set_stopwords(&mut self, words: Vec<String>) {
-        self.stopwords = words.into_iter().collect();
-    }
-
-    fn search(
-        &self,
-        _query: &str,
-        posting_data: Vec<(u32, Vec<u8>)>,
-        top_k: usize,
-    ) -> Vec<(u32, f32)> {
-        if posting_data.is_empty() {
-            return vec![];
-        }
-
-        let mut terms: Vec<TermInfo> = posting_data
-            .into_iter()
-            .map(|(df, data)| {
-                let idf = self.compute_idf(df);
-                let upper_bound = idf * (self.k1 + 1.0);
-                let postings: FxHashMap<u32, u32> = decode_postings_internal(&data)
-                    .into_iter()
-                    .collect();
-                TermInfo { idf, upper_bound, postings }
-            })
-            .collect();
-
-        terms.sort_by_key(|t| t.postings.len());
-
-        let candidate_docs = self.compute_candidates(&terms, top_k);
-        
-        // Compute doc lengths from tf sums
-        let mut doc_lengths: FxHashMap<u32, u32> = FxHashMap::default();
-        for term in &terms {
-            for (&doc_id, &tf) in &term.postings {
-                if candidate_docs.contains(&doc_id) {
-                    *doc_lengths.entry(doc_id).or_insert(0) += tf;
-                }
-            }
-        }
-        
-        // Use avgdl as minimum
-        let min_len = (self.avgdl * 0.5) as u32;
-        for len in doc_lengths.values_mut() {
-            if *len < min_len {
-                *len = self.avgdl as u32;
-            }
-        }
-        
-        let candidates_with_upper: Vec<(f32, u32)> = candidate_docs
-            .iter()
-            .filter_map(|&doc_id| {
-                doc_lengths.get(&doc_id).map(|_| {
-                    let upper: f32 = terms
-                        .iter()
-                        .filter(|t| t.postings.contains_key(&doc_id))
-                        .map(|t| t.upper_bound)
-                        .sum();
-                    (upper, doc_id)
-                })
-            })
-            .collect();
-
-        self.wand_score(terms, candidates_with_upper, &doc_lengths, top_k)
-    }
-}
-
-impl WandSearcher {
-    fn compute_idf(&self, df: u32) -> f32 {
-        let n = self.num_docs as f32;
-        let df = df as f32;
-        ((n - df + 0.5) / (df + 0.5) + 1.0).ln()
-    }
-
-    fn bm25_term_score(&self, tf: u32, idf: f32, doc_len: u32) -> f32 {
-        let tf = tf as f32;
-        let doc_len = doc_len as f32;
-        let numerator = tf * (self.k1 + 1.0);
-        let denominator = tf + self.k1 * (1.0 - self.b + self.b * doc_len / self.avgdl);
-        idf * numerator / denominator
-    }
-
-    fn compute_candidates(&self, terms: &[TermInfo], top_k: usize) -> FxHashSet<u32> {
-        if terms.is_empty() {
-            return FxHashSet::default();
-        }
-
-        // Start with rarest term
-        let mut candidates: FxHashSet<u32> = terms[0].postings.keys().copied().collect();
-        
-        // Early exit for single term or small candidate set
-        if terms.len() == 1 || candidates.len() <= top_k * 5 {
-            return candidates;
-        }
-
-        // Progressive intersection with early termination
-        for term in terms.iter().skip(1) {
-            let term_docs: FxHashSet<u32> = term.postings.keys().copied().collect();
-            let intersection: FxHashSet<u32> = candidates.intersection(&term_docs).copied().collect();
-            
-            // Keep intersection if it has enough candidates
-            if intersection.len() >= top_k * 2 {
-                candidates = intersection;
-            }
-            
-            // Stop early if we have a good candidate set
-            if candidates.len() <= top_k * 5 {
-                break;
-            }
-        }
-
-        candidates
-    }
-
-    fn wand_score(
-        &self,
-        terms: Vec<TermInfo>,
-        mut candidates: Vec<(f32, u32)>,
-        doc_lengths: &FxHashMap<u32, u32>,
-        top_k: usize,
-    ) -> Vec<(u32, f32)> {
-        candidates.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
-
-        let mut heap: BinaryHeap<ScoredDoc> = BinaryHeap::with_capacity(top_k + 1);
-        let mut threshold = 0.0f32;
-
-        for (upper, doc_id) in candidates {
-            if heap.len() >= top_k && upper <= threshold {
-                break;
-            }
-
-            let doc_len = match doc_lengths.get(&doc_id) {
-                Some(&len) => len,
-                None => continue,
-            };
-
-            let score: f32 = terms
-                .iter()
-                .filter_map(|term| {
-                    term.postings
-                        .get(&doc_id)
-                        .map(|&tf| self.bm25_term_score(tf, term.idf, doc_len))
-                })
-                .sum();
-
-            if heap.len() < top_k {
-                heap.push(ScoredDoc { doc_id, score });
-                if heap.len() == top_k {
-                    threshold = heap.peek().map(|d| d.score).unwrap_or(0.0);
-                }
-            } else if score > threshold {
-                heap.pop();
-                heap.push(ScoredDoc { doc_id, score });
-                threshold = heap.peek().map(|d| d.score).unwrap_or(0.0);
-            }
-        }
-
-        let mut results: Vec<_> = heap.into_iter().map(|d| (d.doc_id, d.score)).collect();
-        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
-        results
-    }
-}
-
 fn extract_text_from_html(html: &str) -> String {
     let document = Html::parse_document(html);
     let selector = Selector::parse("body").unwrap();
@@ -337,31 +118,6 @@ fn extract_text_from_html(html: &str) -> String {
     whitespace.replace_all(&text, " ").trim().to_string()
 }
 
-fn extract_json_field(json: &str, field: &str) -> Option<String> {
-    // Try with space (Python default) and without
-    let patterns = [
-        format!("\"{}\": \"", field),
-        format!("\"{}\":\"", field),
-    ];
-    
-    for pattern in &patterns {
-        if let Some(start_idx) = json.find(pattern) {
-            let start = start_idx + pattern.len();
-            let rest = &json[start..];
-            if let Some(end) = rest.find('"') {
-                return Some(rest[..end].to_string());
-            }
-        }
-    }
-    None
-}
-
-fn should_skip_epub_file(name: &str) -> bool {
-    let skip_patterns = ["toc", "nav", "cover", "license", "gutenberg", "copyright", "colophon"];
-    let lower = name.to_lowercase();
-    skip_patterns.iter().any(|p| lower.contains(p))
-}
-
 fn parse_epub_internal(path: &str) -> Option<String> {
     let file = File::open(path).ok()?;
     let reader = BufReader::new(file);
@@ -373,9 +129,7 @@ fn parse_epub_internal(path: &str) -> Option<String> {
         let mut file = archive.by_index(i).ok()?;
         let name = file.name().to_lowercase();
 
-        if (name.ends_with(".html") || name.ends_with(".xhtml") || name.ends_with(".htm"))
-            && !should_skip_epub_file(&name)
-        {
+        if name.ends_with(".html") || name.ends_with(".xhtml") || name.ends_with(".htm") {
             let mut content = String::new();
             file.read_to_string(&mut content).ok()?;
             let text = extract_text_from_html(&content);
@@ -391,21 +145,6 @@ fn parse_epub_internal(path: &str) -> Option<String> {
 #[pyfunction]
 fn parse_epub(path: &str) -> Option<String> {
     parse_epub_internal(path)
-}
-
-#[pyfunction]
-fn parse_pdf(path: &str) -> Option<String> {
-    let bytes = std::fs::read(path).ok()?;
-    let text = pdf_extract::extract_text_from_mem(&bytes).ok()?;
-    let whitespace = Regex::new(r"\s+").unwrap();
-    Some(whitespace.replace_all(&text, " ").trim().to_string())
-}
-
-#[pyfunction]
-fn parse_txt(path: &str) -> Option<String> {
-    let text = std::fs::read_to_string(path).ok()?;
-    let whitespace = Regex::new(r"\s+").unwrap();
-    Some(whitespace.replace_all(&text, " ").trim().to_string())
 }
 
 #[pyfunction]
@@ -450,25 +189,106 @@ fn chunk_text(text: &str, chunk_size: usize, overlap: usize) -> Vec<String> {
     chunks
 }
 
-fn parse_file(path: &str) -> Option<String> {
-    if path.ends_with(".epub") {
-        parse_epub_internal(path)
-    } else if path.ends_with(".pdf") {
-        let bytes = std::fs::read(path).ok()?;
-        let text = pdf_extract::extract_text_from_mem(&bytes).ok()?;
-        let whitespace = Regex::new(r"\s+").unwrap();
-        Some(whitespace.replace_all(&text, " ").trim().to_string())
-    } else if path.ends_with(".txt") {
-        let text = std::fs::read_to_string(path).ok()?;
-        let whitespace = Regex::new(r"\s+").unwrap();
-        Some(whitespace.replace_all(&text, " ").trim().to_string())
-    } else {
-        None
+#[pyclass]
+pub struct BatchIndexer {
+    terms: FxHashMap<String, Vec<(u32, u32)>>,
+    docs: Vec<(u32, u32, String)>,
+    total_length: u64,
+    next_doc_id: u32,
+    memory_bytes: usize,
+    max_memory_bytes: usize,
+}
+
+#[pymethods]
+impl BatchIndexer {
+    #[new]
+    #[pyo3(signature = (max_memory_mb=256))]
+    fn new(max_memory_mb: usize) -> Self {
+        Self {
+            terms: FxHashMap::default(),
+            docs: Vec::new(),
+            total_length: 0,
+            next_doc_id: 0,
+            memory_bytes: 0,
+            max_memory_bytes: max_memory_mb * 1024 * 1024,
+        }
+    }
+
+    fn add_document(&mut self, text: &str, metadata: &str) -> u32 {
+        let doc_id = self.next_doc_id;
+        self.next_doc_id += 1;
+
+        let tokens = analyze(text);
+        let doc_length = tokens.len() as u32;
+
+        self.docs.push((doc_id, doc_length, metadata.to_string()));
+        self.total_length += doc_length as u64;
+        self.memory_bytes += metadata.len() + 12;
+
+        let mut term_freqs: FxHashMap<&str, u32> = FxHashMap::default();
+        for token in &tokens {
+            *term_freqs.entry(token.as_str()).or_insert(0) += 1;
+        }
+
+        for (term, freq) in term_freqs {
+            let is_new = !self.terms.contains_key(term);
+            let postings = self.terms.entry(term.to_string()).or_default();
+            postings.push((doc_id, freq));
+            if is_new {
+                self.memory_bytes += term.len() + 24;
+            }
+            self.memory_bytes += 8;
+        }
+
+        doc_id
+    }
+
+    fn should_flush(&self) -> bool {
+        self.memory_bytes >= self.max_memory_bytes
+    }
+
+    fn get_flush_data(&mut self, py: Python<'_>) -> (Vec<(u32, u32, String)>, Vec<(String, u32, Py<PyBytes>)>) {
+        let docs = std::mem::take(&mut self.docs);
+        let terms: Vec<_> = self.terms.drain()
+            .map(|(term, postings)| {
+                let df = postings.len() as u32;
+                let encoded = encode_postings_internal(&postings);
+                let py_bytes = PyBytes::new_bound(py, &encoded).into();
+                (term, df, py_bytes)
+            })
+            .collect();
+        
+        self.memory_bytes = 0;
+        (docs, terms)
+    }
+
+    fn num_docs(&self) -> u32 {
+        self.next_doc_id
+    }
+
+    fn num_pending_docs(&self) -> usize {
+        self.docs.len()
+    }
+
+    fn num_terms(&self) -> usize {
+        self.terms.len()
+    }
+
+    fn memory_mb(&self) -> f64 {
+        self.memory_bytes as f64 / (1024.0 * 1024.0)
+    }
+
+    fn total_length(&self) -> u64 {
+        self.total_length
+    }
+
+    fn set_next_doc_id(&mut self, doc_id: u32) {
+        self.next_doc_id = doc_id;
     }
 }
 
 #[pyfunction]
-fn process_books_to_index(
+fn process_epubs_to_index(
     py: Python<'_>,
     paths: Vec<String>,
     metadatas: Vec<String>,
@@ -481,19 +301,11 @@ fn process_books_to_index(
     let doc_counter: Mutex<u32> = Mutex::new(0);
 
     paths.into_par_iter().zip(metadatas.into_par_iter()).for_each(|(path, base_meta)| {
-        let text = match parse_file(&path) {
+        let text = match parse_epub_internal(&path) {
             Some(t) => t,
             None => return,
         };
 
-        let title = extract_json_field(&base_meta, "title").unwrap_or_default();
-        let author = extract_json_field(&base_meta, "author").unwrap_or_default();
-        let title_tokens: Vec<String> = analyze(&format!("{} {}", title, author));
-        let title_tokens_json: String = title_tokens.iter()
-            .map(|t| format!("\"{}\"", t))
-            .collect::<Vec<_>>()
-            .join(",");
-        
         let chunks = chunk_text(&text, chunk_size, overlap);
         
         for chunk in chunks {
@@ -507,7 +319,7 @@ fn process_books_to_index(
                 id
             };
 
-            let meta = format!("{},\"chunk_id\":{},\"title_tokens\":[{}]}}", &base_meta[..base_meta.len()-1], doc_id, title_tokens_json);
+            let meta = format!("{},\"chunk_id\":{}}}", &base_meta[..base_meta.len()-1], doc_id);
 
             {
                 let mut docs_lock = docs.lock().unwrap();
@@ -632,6 +444,42 @@ impl BM25Index {
         }
     }
 
+    fn search(&self, query: &str, top_k: usize) -> Vec<(u32, f32, String)> {
+        let tokens = analyze(query);
+        let mut candidates: FxHashMap<u32, f32> = FxHashMap::default();
+
+        for token in &tokens {
+            if let (Some(postings_blob), Some(&df)) =
+                (self.data.terms.get(token), self.data.term_df.get(token))
+            {
+                let idf = self.idf(df);
+                let postings = decode_postings_internal(postings_blob);
+                for (doc_id, tf) in postings {
+                    let doc_len = self.data.doc_lengths[doc_id as usize] as f32;
+                    let score = self.bm25_score(tf as f32, idf, doc_len);
+                    *candidates.entry(doc_id).or_insert(0.0) += score;
+                }
+            }
+        }
+
+        let mut results: Vec<_> = candidates.into_iter().collect();
+        results.par_sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        results.truncate(top_k);
+
+        results
+            .into_iter()
+            .map(|(doc_id, score)| {
+                let meta = self
+                    .data
+                    .doc_metadata
+                    .get(doc_id as usize)
+                    .cloned()
+                    .unwrap_or_default();
+                (doc_id, score, meta)
+            })
+            .collect()
+    }
+
     fn save(&self, path: &str) -> PyResult<()> {
         let file = File::create(path)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
@@ -670,18 +518,33 @@ impl BM25Index {
     }
 }
 
+impl BM25Index {
+    fn idf(&self, df: u32) -> f32 {
+        let n = self.data.num_docs as f32;
+        let df = df as f32;
+        ((n - df + 0.5) / (df + 0.5) + 1.0).ln()
+    }
+
+    fn bm25_score(&self, tf: f32, idf: f32, doc_len: f32) -> f32 {
+        let k1 = self.data.k1;
+        let b = self.data.b;
+        let avgdl = self.data.avgdl;
+        let numerator = tf * (k1 + 1.0);
+        let denominator = tf + k1 * (1.0 - b + b * doc_len / avgdl);
+        idf * numerator / denominator
+    }
+}
+
 #[pymodule]
 fn rust_bm25(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<BM25Index>()?;
-    m.add_class::<WandSearcher>()?;
+    m.add_class::<BatchIndexer>()?;
     m.add_function(wrap_pyfunction!(analyze, m)?)?;
     m.add_function(wrap_pyfunction!(encode_postings, m)?)?;
     m.add_function(wrap_pyfunction!(decode_postings, m)?)?;
     m.add_function(wrap_pyfunction!(merge_postings, m)?)?;
     m.add_function(wrap_pyfunction!(parse_epub, m)?)?;
-    m.add_function(wrap_pyfunction!(parse_pdf, m)?)?;
-    m.add_function(wrap_pyfunction!(parse_txt, m)?)?;
     m.add_function(wrap_pyfunction!(chunk_text, m)?)?;
-    m.add_function(wrap_pyfunction!(process_books_to_index, m)?)?;
+    m.add_function(wrap_pyfunction!(process_epubs_to_index, m)?)?;
     Ok(())
 }

@@ -1,149 +1,91 @@
 import argparse
-import hashlib
+import json
 from pathlib import Path
 
-from rust_bm25 import analyze, encode_postings, chunk_text, parse_epub, parse_pdf, parse_txt
+from rust_bm25 import process_epubs_to_index
 
-from src.downloader.downloader import BookSeeder
+from src.downloader.downloader import EpubSeeder
 from src.indexer.storage import IndexStorage
-from src.indexer.stopwords import load_stopwords
-
-
-STOPWORDS = load_stopwords()
+from src.db.database import PostgresRepository
 
 
 def seed_corpus(output_dir: str, limit: int | None = None, batch_size: int = 200, workers: int = 16):
-    seeder = BookSeeder(output_dir=output_dir, max_workers=workers)
+    seeder = EpubSeeder(output_dir=output_dir, max_workers=workers)
     total = seeder.seed_all(limit=limit, batch_size=batch_size)
     print(f"Seeded {total} books")
     return total
 
 
-def file_hash(path: Path) -> str:
-    return hashlib.md5(path.read_bytes()).hexdigest()
-
-
-def parse_file(path: Path) -> str | None:
-    if path.suffix == ".epub":
-        return parse_epub(str(path))
-    elif path.suffix == ".pdf":
-        return parse_pdf(str(path))
-    elif path.suffix == ".txt":
-        return parse_txt(str(path))
-    return None
-
-
 def index_corpus(
-    books_dir: str,
+    epub_dir: str,
     chunk_size: int = 1000,
     chunk_overlap: int = 100,
-    full: bool = False,
+    batch_size: int = 200
 ):
-    books_dir = Path(books_dir)
-    book_files = list(books_dir.glob("*.epub")) + list(books_dir.glob("*.txt")) + list(books_dir.glob("*.pdf"))
-    total_files = len(book_files)
+    epub_dir = Path(epub_dir)
+    epub_files = list(epub_dir.glob("*.epub"))
+    total_files = len(epub_files)
     
+    db = PostgresRepository()
     storage = IndexStorage()
+    storage.clear()
     
-    if full:
-        storage.clear()
-        next_chunk_id = 0
-    else:
-        next_chunk_id = storage.get_next_chunk_id()
-    
-    indexed = 0
-    skipped = 0
+    total_docs = 0
     total_length = 0
-    terms_batch: dict[str, list[tuple[int, int]]] = {}
+    processed = 0
     
-    for idx, f in enumerate(book_files):
-        book_id = f.stem
-        fhash = file_hash(f)
+    for i in range(0, total_files, batch_size):
+        batch_files = epub_files[i:i + batch_size]
+        paths = []
+        metadatas = []
         
-        # Skip if already indexed with same hash
-        if not full and storage.is_book_indexed(book_id, fhash):
-            skipped += 1
-            continue
+        for f in batch_files:
+            book_id = f.stem
+            book_meta = db.get_book('gutenberg', book_id)
+            if not book_meta:
+                book_meta = {'book_id': book_id, 'source': 'gutenberg'}
+            paths.append(str(f))
+            metadatas.append(json.dumps(book_meta))
         
-        # Parse file
-        text = parse_file(f)
-        if not text:
-            continue
+        docs, terms, batch_length = process_epubs_to_index(
+            paths, metadatas, chunk_size, chunk_overlap
+        )
         
-        # Chunk text
-        chunks = chunk_text(text, chunk_size, chunk_overlap)
-        if not chunks:
-            continue
-        
-        # Save chunks to zstd file
-        storage.save_book_chunks(book_id, chunks)
-        
-        # Index chunks
-        chunk_records = []
-        for local_id, chunk in enumerate(chunks):
-            global_id = next_chunk_id + local_id
-            tokens = analyze(chunk)
-            total_length += len(tokens)
+        if docs:
+            adjusted_docs = [(d[0] + total_docs, d[1], d[2]) for d in docs]
+            adjusted_terms = []
+            for term, df, postings_bytes in terms:
+                from rust_bm25 import decode_postings, encode_postings
+                postings = decode_postings(postings_bytes)
+                adjusted = [(doc_id + total_docs, tf) for doc_id, tf in postings]
+                adjusted_terms.append((term, df, encode_postings(adjusted)))
             
-            chunk_records.append((global_id, book_id))
+            storage.insert_documents_batch(adjusted_docs)
+            storage.insert_terms_batch(adjusted_terms, merge=True)
             
-            term_freqs: dict[str, int] = {}
-            for token in tokens:
-                if token not in STOPWORDS:
-                    term_freqs[token] = term_freqs.get(token, 0) + 1
-            
-            for term, freq in term_freqs.items():
-                if term not in terms_batch:
-                    terms_batch[term] = []
-                terms_batch[term].append((global_id, freq))
+            total_docs += len(docs)
+            total_length += batch_length
         
-        storage.insert_chunks_batch(chunk_records)
-        storage.mark_book_indexed(book_id, fhash, len(chunks))
-        
-        next_chunk_id += len(chunks)
-        indexed += 1
-        
-        if indexed % 100 == 0:
-            print(f"Indexed {indexed} books, {next_chunk_id} chunks (skipped {skipped})")
+        processed += len(batch_files)
+        print(f"Indexed {processed}/{total_files} books, {total_docs} chunks")
     
-    # Save terms
-    if terms_batch:
-        print(f"Saving {len(terms_batch)} terms...")
-        terms_list = []
-        for term, postings in terms_batch.items():
-            terms_list.append((term, len(postings), encode_postings(postings)))
-            if len(terms_list) >= 10000:
-                storage.insert_terms_batch(terms_list, merge=not full)
-                terms_list = []
-        if terms_list:
-            storage.insert_terms_batch(terms_list, merge=not full)
-    
-    # Update globals
-    old_num = int(storage.get_global("num_docs") or 0)
-    old_total = float(storage.get_global("total_length") or 0)
-    
-    new_num = next_chunk_id
-    new_total = old_total + total_length
-    avgdl = new_total / new_num if new_num > 0 else 0
-    
-    storage.set_global("num_docs", str(new_num))
-    storage.set_global("total_length", str(new_total))
+    avgdl = total_length / total_docs if total_docs > 0 else 0
+    storage.set_global("num_docs", str(total_docs))
     storage.set_global("avgdl", str(avgdl))
     storage.set_global("k1", "1.5")
     storage.set_global("b", "0.75")
     
-    print(f"Done: {indexed} indexed, {skipped} skipped, {next_chunk_id} total chunks")
+    print(f"Index saved: {total_docs} chunks from {processed} books")
 
 
 def search(query: str, top_k: int = 10):
-    from src.indexer.ranker import Ranker
-    from src.indexer.storage import IndexStorage
-    
-    with IndexStorage() as storage:
-        ranker = Ranker(storage)
-        results = ranker.search(query, top_k)
-        for r in results:
-            print(f"[{r.score:.4f}] {r.title} by {r.author} (book={r.book_id})")
+    from src.indexer.pg_bm25 import PgBM25Index
+    index = PgBM25Index()
+    results = index.search(query, top_k)
+    for doc_id, score, meta in results:
+        title = meta.get('title', 'Unknown')
+        author = meta.get('author', 'Unknown')
+        print(f"[{score:.4f}] {title} by {author} (book={meta.get('book_id')}, chunk={meta.get('chunk_id')})")
 
 
 def main():
@@ -151,16 +93,16 @@ def main():
     subparsers = parser.add_subparsers(dest='command', required=True)
     
     seed_parser = subparsers.add_parser('seed')
-    seed_parser.add_argument('--output', default='data/books')
+    seed_parser.add_argument('--output', default='data/epubs')
     seed_parser.add_argument('--limit', type=int, default=None)
     seed_parser.add_argument('--batch-size', type=int, default=200)
     seed_parser.add_argument('--workers', type=int, default=16)
     
     idx_parser = subparsers.add_parser('index')
-    idx_parser.add_argument('--books-dir', default='data/books')
+    idx_parser.add_argument('--epub-dir', default='data/epubs')
     idx_parser.add_argument('--chunk-size', type=int, default=1000)
     idx_parser.add_argument('--chunk-overlap', type=int, default=100)
-    idx_parser.add_argument('--full', action='store_true', help='Full reindex (clear existing)')
+    idx_parser.add_argument('--batch-size', type=int, default=200)
     
     search_parser = subparsers.add_parser('search')
     search_parser.add_argument('query')
@@ -171,7 +113,7 @@ def main():
     if args.command == 'seed':
         seed_corpus(args.output, args.limit, args.batch_size, args.workers)
     elif args.command == 'index':
-        index_corpus(args.books_dir, args.chunk_size, args.chunk_overlap, args.full)
+        index_corpus(args.epub_dir, args.chunk_size, args.chunk_overlap, args.batch_size)
     elif args.command == 'search':
         search(args.query, args.top_k)
 
