@@ -42,6 +42,7 @@ class PostgresRepository:
                     credits TEXT,
                     copyright_status TEXT,
                     downloads TEXT,
+                    cover_url TEXT,
                     files JSONB NOT NULL DEFAULT '[]'::jsonb,
                     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
@@ -50,6 +51,7 @@ class PostgresRepository:
             )
             conn.execute("ALTER TABLE books ADD COLUMN IF NOT EXISTS id BIGSERIAL")
             conn.execute("ALTER TABLE books ADD COLUMN IF NOT EXISTS source TEXT")
+            conn.execute("ALTER TABLE books ADD COLUMN IF NOT EXISTS cover_url TEXT")
             conn.execute("ALTER TABLE books ALTER COLUMN book_id TYPE TEXT USING book_id::text")
             conn.execute("UPDATE books SET source = 'gutenberg' WHERE source IS NULL")
             conn.execute("ALTER TABLE books DROP CONSTRAINT IF EXISTS books_pkey")
@@ -81,6 +83,10 @@ class PostgresRepository:
         if not source or not source_book_id:
             raise ValueError("source and book_id are required")
         files = metadata.get("files") or []
+        # Generate cover URL for Gutenberg
+        cover_url = metadata.get("cover_url")
+        if not cover_url and source == "gutenberg":
+            cover_url = f"https://www.gutenberg.org/cache/epub/{source_book_id}/pg{source_book_id}.cover.medium.jpg"
         values = (
             source,
             source_book_id,
@@ -95,6 +101,7 @@ class PostgresRepository:
             metadata.get("credits"),
             metadata.get("copyright_status"),
             metadata.get("downloads"),
+            cover_url,
             Json(files),
         )
         with self.pool.connection() as conn:
@@ -103,9 +110,9 @@ class PostgresRepository:
                 INSERT INTO books (
                     source, book_id, url, title, author, illustrator, release_date,
                     language, category, original_publication, credits,
-                    copyright_status, downloads, files
+                    copyright_status, downloads, cover_url, files
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                 )
                 ON CONFLICT (source, book_id) DO UPDATE SET
                     url = EXCLUDED.url,
@@ -119,6 +126,7 @@ class PostgresRepository:
                     credits = EXCLUDED.credits,
                     copyright_status = EXCLUDED.copyright_status,
                     downloads = EXCLUDED.downloads,
+                    cover_url = EXCLUDED.cover_url,
                     files = EXCLUDED.files,
                     updated_at = NOW()
                 """,
@@ -132,7 +140,7 @@ class PostgresRepository:
                 SELECT
                     source, book_id, url, title, author, illustrator, release_date,
                     language, category, original_publication, credits,
-                    copyright_status, downloads, files
+                    copyright_status, downloads, cover_url, files
                 FROM books
                 WHERE source = %s AND book_id = %s
                 """,
@@ -142,6 +150,9 @@ class PostgresRepository:
             return None
         data = dict(row)
         data["files"] = data.get("files") or []
+        # Fallback cover URL
+        if not data.get("cover_url") and source == "gutenberg":
+            data["cover_url"] = f"https://www.gutenberg.org/cache/epub/{book_id}/pg{book_id}.cover.medium.jpg"
         return data
 
     def search_books(self, query: str, limit: int = 10, source: Optional[str] = None) -> List[Dict]:

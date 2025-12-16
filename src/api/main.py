@@ -50,6 +50,7 @@ class BookMetadata(BaseModel):
     credits: Optional[str] = None
     copyright_status: Optional[str] = None
     downloads: Optional[str] = None
+    cover_url: Optional[str] = None
     files: List[dict] = Field(default_factory=list)
 
 
