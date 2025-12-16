@@ -1,20 +1,49 @@
 use pyo3::prelude::*;
-use regex::Regex;
 use scraper::{Html, Selector};
 use std::fs::File;
 use std::io::{BufReader, Read};
 use zip::ZipArchive;
 
 use crate::analysis::analyze;
+use once_cell::sync::Lazy;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::Path;
 
+// Pre-compiled selector for better performance
+static BODY_SELECTOR: Lazy<Selector> = Lazy::new(|| Selector::parse("body").unwrap());
+
+/// Normalize whitespace: collapse multiple whitespace chars into single space and trim.
+/// This is ~2x faster than regex for this simple pattern.
+#[inline]
+fn normalize_whitespace(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut prev_was_space = true; // Start true to trim leading
+
+    for c in text.chars() {
+        if c.is_whitespace() {
+            if !prev_was_space {
+                result.push(' ');
+                prev_was_space = true;
+            }
+        } else {
+            result.push(c);
+            prev_was_space = false;
+        }
+    }
+
+    // Trim trailing space if present
+    if result.ends_with(' ') {
+        result.pop();
+    }
+
+    result
+}
+
 fn extract_text_from_html(html: &str) -> String {
     let document = Html::parse_document(html);
-    let selector = Selector::parse("body").unwrap();
     let mut text = String::new();
 
-    if let Some(body) = document.select(&selector).next() {
+    if let Some(body) = document.select(&BODY_SELECTOR).next() {
         for node in body.text() {
             text.push_str(node);
             text.push(' ');
@@ -26,8 +55,7 @@ fn extract_text_from_html(html: &str) -> String {
         }
     }
 
-    let whitespace = Regex::new(r"\s+").unwrap();
-    whitespace.replace_all(&text, " ").trim().to_string()
+    normalize_whitespace(&text)
 }
 
 pub fn extract_json_field(json: &str, field: &str) -> Option<String> {
@@ -95,52 +123,73 @@ pub fn parse_epub(path: &str) -> Option<String> {
 pub fn parse_pdf(path: &str) -> Option<String> {
     let bytes = std::fs::read(path).ok()?;
     let text = pdf_extract::extract_text_from_mem(&bytes).ok()?;
-    let whitespace = Regex::new(r"\s+").unwrap();
-    Some(whitespace.replace_all(&text, " ").trim().to_string())
+    Some(normalize_whitespace(&text))
 }
 
 #[pyfunction]
 pub fn parse_txt(path: &str) -> Option<String> {
     let text = std::fs::read_to_string(path).ok()?;
-    let whitespace = Regex::new(r"\s+").unwrap();
-    Some(whitespace.replace_all(&text, " ").trim().to_string())
+    Some(normalize_whitespace(&text))
 }
 
 #[pyfunction]
 pub fn chunk_text(text: &str, chunk_size: usize, overlap: usize) -> Vec<String> {
-    if text.len() <= chunk_size {
-        return if text.is_empty() {
+    // chunk_size and overlap are now in CHARACTERS, not bytes
+    let chars: Vec<char> = text.chars().collect();
+    let total_chars = chars.len();
+
+    if total_chars == 0 {
+        return vec![];
+    }
+
+    if total_chars <= chunk_size {
+        let trimmed = text.trim();
+        return if trimmed.is_empty() {
             vec![]
         } else {
-            vec![text.to_string()]
+            vec![trimmed.to_string()]
         };
     }
 
     let mut chunks = Vec::new();
-    let bytes = text.as_bytes();
     let mut start = 0;
 
-    while start < bytes.len() {
-        let mut end = (start + chunk_size).min(bytes.len());
+    while start < total_chars {
+        let mut end = (start + chunk_size).min(total_chars);
 
-        if end < bytes.len() {
-            while end > start && bytes[end] != b' ' {
-                end -= 1;
+        // Try to break at word boundary (space) if not at end
+        if end < total_chars {
+            // Look backwards for a space
+            let mut best_break = end;
+            for i in (start..end).rev() {
+                if chars[i] == ' ' {
+                    best_break = i;
+                    break;
+                }
             }
-            if end == start {
-                end = (start + chunk_size).min(bytes.len());
+            // Only use word break if we found one and it's not at the start
+            if best_break > start {
+                end = best_break;
             }
         }
 
-        if let Ok(chunk) = std::str::from_utf8(&bytes[start..end]) {
-            let trimmed = chunk.trim();
-            if !trimmed.is_empty() {
-                chunks.push(trimmed.to_string());
-            }
+        // Collect chars into string
+        let chunk: String = chars[start..end].iter().collect();
+        let trimmed = chunk.trim();
+        if !trimmed.is_empty() {
+            chunks.push(trimmed.to_string());
         }
 
-        start = if end > overlap { end - overlap } else { end };
-        if start >= bytes.len() || end == bytes.len() {
+        // Move forward with overlap
+        let advance = if end > overlap { end - overlap } else { end };
+        if advance <= start {
+            // Prevent infinite loop
+            start = end;
+        } else {
+            start = advance;
+        }
+
+        if end >= total_chars {
             break;
         }
     }
@@ -154,12 +203,10 @@ pub fn parse_file(path: &str) -> Option<String> {
     } else if path.ends_with(".pdf") {
         let bytes = std::fs::read(path).ok()?;
         let text = pdf_extract::extract_text_from_mem(&bytes).ok()?;
-        let whitespace = Regex::new(r"\s+").unwrap();
-        Some(whitespace.replace_all(&text, " ").trim().to_string())
+        Some(normalize_whitespace(&text))
     } else if path.ends_with(".txt") {
         let text = std::fs::read_to_string(path).ok()?;
-        let whitespace = Regex::new(r"\s+").unwrap();
-        Some(whitespace.replace_all(&text, " ").trim().to_string())
+        Some(normalize_whitespace(&text))
     } else {
         None
     }
@@ -205,7 +252,7 @@ pub fn process_single_book(
     let chunk_path = shard_dir.join(format!("{}.zst", book_id));
 
     let full_text = chunks.join("\n");
-    let compressed = zstd::stream::encode_all(full_text.as_bytes(), 0).ok()?;
+    let compressed = zstd::stream::encode_all(full_text.as_bytes(), 3).ok()?;
     std::fs::write(chunk_path, compressed).ok();
 
     // Index chunks

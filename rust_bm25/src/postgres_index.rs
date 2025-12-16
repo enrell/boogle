@@ -351,7 +351,7 @@ fn process_single_book(
     let chunk_path = shard_dir.join(format!("{}.zst", book_id));
 
     let full_text = chunks.join("\n");
-    let compressed = zstd::stream::encode_all(full_text.as_bytes(), 0).ok()?;
+    let compressed = zstd::stream::encode_all(full_text.as_bytes(), 3).ok()?;
     std::fs::write(chunk_path, compressed).ok();
 
     // Index chunks

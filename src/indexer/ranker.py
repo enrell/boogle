@@ -72,7 +72,7 @@ class Ranker:
         """Term is too common (>90% of docs)."""
         return self._num_docs > 0 and df / self._num_docs > DF_THRESHOLD
 
-    @lru_cache(maxsize=1000)
+    @lru_cache(maxsize=10000)
     def _get_term_cached(self, term: str) -> tuple[int, bytes] | None:
         """Cached posting list lookup."""
         return self.storage.get_term(term)

@@ -283,7 +283,7 @@ pub fn process_batch(
 
                 let full_text = chunks.join("\n");
                 let compressed =
-                    zstd::stream::encode_all(full_text.as_bytes(), 0).unwrap_or_default();
+                    zstd::stream::encode_all(full_text.as_bytes(), 3).unwrap_or_default();
                 std::fs::write(chunk_path, compressed).ok();
 
                 let mut local_chunk_records = Vec::with_capacity(chunks.len());
