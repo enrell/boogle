@@ -1,7 +1,7 @@
 import { useLoaderData } from "react-router";
 import type { MetaFunction, LoaderFunctionArgs } from "react-router";
 import { Footer } from "../components/layout/Footer";
-import { getBookMetadata, type BookMetadata } from "~/api";
+import { getBookMetadata, type BookMetadata } from "~/api.server";
 import { ThemeToggle } from "~/components/ui/ThemeToggle";
 import { Logo } from "~/components/ui/Logo";
 import { Link } from "react-router";

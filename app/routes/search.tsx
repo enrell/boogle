@@ -1,10 +1,8 @@
-import type { MetaFunction } from "react-router";
-import { useSearchParams } from "react-router";
-import { Link } from "react-router";
+import type { MetaFunction, LoaderFunctionArgs } from "react-router";
+import { useLoaderData, Link } from "react-router";
 import { Header } from "../components/layout/Header";
 import { Footer } from "../components/layout/Footer";
-import { searchBooks, type SearchResult } from "../api";
-import { useState, useEffect } from "react";
+import { searchBooks, type SearchResult } from "../api.server";
 
 export const meta: MetaFunction = () => {
   return [
@@ -13,42 +11,45 @@ export const meta: MetaFunction = () => {
   ];
 };
 
-export default function Search() {
-  const [searchParams] = useSearchParams();
-  const query = searchParams.get("q") || "";
+type LoaderData = {
+  query: string;
+  results: SearchResult[];
+  error: string | null;
+  searchTime: number;
+};
 
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [searchTime, setSearchTime] = useState<number>(0);
+export async function loader({ request }: LoaderFunctionArgs): Promise<LoaderData> {
+  const url = new URL(request.url);
+  const query = url.searchParams.get("q") || "";
 
-  useEffect(() => {
-    if (!query.trim()) {
-      setResults([]);
-      return;
-    }
+  if (!query.trim()) {
+    return { query, results: [], error: null, searchTime: 0 };
+  }
 
-    const fetchResults = async () => {
-      setLoading(true);
-      setError(null);
-      const startTime = performance.now();
-
-      try {
-        const results = await searchBooks(query);
-        setSearchTime(performance.now() - startTime);
-        setResults(results);
-      } catch (err) {
-        setError((err as Error)?.message);
-        setResults([]);
-      } finally {
-        setLoading(false);
-      }
+  const startTime = Date.now();
+  try {
+    const results = await searchBooks(query);
+    return {
+      query,
+      results,
+      error: null,
+      searchTime: Date.now() - startTime,
     };
-    fetchResults();
-  }, [query]);
+  } catch (err) {
+    return {
+      query,
+      results: [],
+      error: (err as Error).message,
+      searchTime: Date.now() - startTime,
+    };
+  }
+}
+
+export default function Search() {
+  const { query, results, error, searchTime } = useLoaderData<typeof loader>();
 
   return (
-    <div className="flex flex-col min-h-screen bg-white dark:bg-gray-900">
+    <div className="flex flex-col min-h-screen bg-white dark:bg-boogle-dark">
       <Header query={query} />
 
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 py-6">
@@ -58,13 +59,13 @@ export default function Search() {
           </div>
         )}
 
-        {!loading && !error && results.length > 0 && (
+        {!error && results.length > 0 && (
           <p className="text-gray-500 text-sm mb-6">
             About {results.length} results ({(searchTime / 1000).toFixed(2)} seconds)
           </p>
         )}
 
-        {!loading && !error && results.length === 0 && query && (
+        {!error && results.length === 0 && query && (
           <div className="text-gray-600 dark:text-gray-400">
             <p className="text-lg mb-2">No results found for "{query}"</p>
             <p className="text-sm">Try different keywords or check your spelling.</p>
@@ -72,35 +73,23 @@ export default function Search() {
         )}
 
         <div className="space-y-6">
-          {loading ? (
-            <div className="space-y-6">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="animate-pulse">
-                  <div className="h-3 bg-gray-200 rounded w-64 mb-2"></div>
-                  <div className="h-5 bg-gray-200 rounded w-96 mb-2"></div>
-                  <div className="h-3 bg-gray-200 rounded w-80"></div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            results.map((book) => (
-              <article key={book.book_id} className="group">
-                <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">
-                  {book.url}
-                </div>
-                <Link
-                  to={`/book/${book.book_id}`}
-                  className="text-xl text-blue-700 dark:text-blue-400 hover:underline visited:text-purple-700 dark:visited:text-purple-400 font-medium block mb-1"
-                >
-                  {book.title || "Untitled"}
-                </Link>
-                <p className="text-sm text-gray-700 dark:text-gray-300">
-                  <span className="text-gray-500">by</span>{" "}
-                  <span className="font-medium">{book.author || "Unknown Author"}</span>
-                </p>
-              </article>
-            ))
-          )}
+          {results.map((book) => (
+            <article key={book.book_id} className="group">
+              <div className="text-sm text-gray-600 dark:text-gray-400 mb-1">
+                {book.url}
+              </div>
+              <Link
+                to={`/book/${book.book_id}`}
+                className="text-xl text-blue-700 dark:text-blue-400 hover:underline visited:text-purple-700 dark:visited:text-purple-400 font-medium block mb-1"
+              >
+                {book.title || "Untitled"}
+              </Link>
+              <p className="text-sm text-gray-700 dark:text-gray-300">
+                <span className="text-gray-500">by</span>{" "}
+                <span className="font-medium">{book.author || "Unknown Author"}</span>
+              </p>
+            </article>
+          ))}
         </div>
       </main>
       <Footer />
