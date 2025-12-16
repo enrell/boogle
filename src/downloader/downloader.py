@@ -5,20 +5,18 @@ from pathlib import Path
 from typing import Iterator
 
 import requests
-from bs4 import BeautifulSoup
 
 from src.db.database import PostgresRepository
 from src.scraper.scraper import GutenbergScraper
 
 _local = threading.local()
 
-# Format priority: plain text > epub.noimages > epub > pdf
 FORMAT_PRIORITY = [
-    ("txt", ".txt.utf-8", "text/plain"),
-    ("txt", ".txt", "text/plain"),
-    ("epub", ".epub.noimages", "application/epub+zip"),
-    ("epub", ".epub.images", "application/epub+zip"),
-    ("pdf", ".pdf", "application/pdf"),
+    ("txt", ".txt.utf-8"),
+    ("txt", ".txt"),
+    ("epub", ".epub.noimages"),
+    ("epub", ".epub.images"),
+    ("pdf", ".pdf"),
 ]
 
 
@@ -31,55 +29,24 @@ def _get_session() -> requests.Session:
     return _local.session
 
 
+def _get_scraper() -> GutenbergScraper:
+    if not hasattr(_local, "scraper"):
+        _local.scraper = GutenbergScraper()
+    return _local.scraper
+
+
 def _fetch_metadata(book_id: str) -> dict:
-    url = f"https://www.gutenberg.org/ebooks/{book_id}"
-    meta = {"book_id": book_id, "source": "gutenberg", "url": url}
     try:
-        session = _get_session()
-        resp = session.get(url, timeout=15)
-        if resp.status_code != 200:
-            return meta
-
-        soup = BeautifulSoup(resp.text, "html.parser")
-
-        title_elem = soup.find("td", itemprop="headline")
-        if title_elem:
-            meta["title"] = title_elem.get_text(strip=True)
-
-        bibrec = soup.find("table", class_="bibrec")
-        if bibrec:
-            for row in bibrec.find_all("tr"):
-                th = row.find("th")
-                td = row.find("td")
-                if not th or not td:
-                    continue
-                key = th.get_text(strip=True).lower()
-                if key == "author":
-                    link = td.find("a")
-                    meta["author"] = link.get_text(strip=True) if link else td.get_text(strip=True)
-                elif key == "illustrator":
-                    link = td.find("a")
-                    meta["illustrator"] = link.get_text(strip=True) if link else td.get_text(strip=True)
-                elif key == "language":
-                    meta["language"] = td.get_text(strip=True)
-                elif key == "category":
-                    meta["category"] = td.get_text(strip=True)
-                elif key == "release date":
-                    meta["release_date"] = td.get_text(strip=True)
-                elif key == "copyright status":
-                    meta["copyright_status"] = td.get_text(strip=True)
-
-        return meta
+        return _get_scraper().extract_metadata(book_id)
     except Exception:
-        return meta
+        return {"book_id": book_id, "source": "gutenberg", "url": f"https://www.gutenberg.org/ebooks/{book_id}"}
 
 
 def _download_book(book_id: str, output_dir: Path, log_file: Path) -> tuple[str, Path | None, dict, str | None]:
-    """Download book in best available format. Returns (book_id, path, meta, format_type)."""
     session = _get_session()
     base_url = f"https://www.gutenberg.org/ebooks/{book_id}"
     
-    for fmt_type, suffix, _ in FORMAT_PRIORITY:
+    for fmt_type, suffix in FORMAT_PRIORITY:
         ext = ".txt" if fmt_type == "txt" else f".{fmt_type}"
         filepath = output_dir / f"{book_id}{ext}"
         
@@ -99,14 +66,8 @@ def _download_book(book_id: str, output_dir: Path, log_file: Path) -> tuple[str,
         except requests.RequestException:
             continue
     
-    # No format available - log it
     meta = _fetch_metadata(book_id)
-    log_entry = {
-        "book_id": book_id,
-        "url": base_url,
-        "title": meta.get("title"),
-        "reason": "no_supported_format",
-    }
+    log_entry = {"book_id": book_id, "url": base_url, "title": meta.get("title"), "reason": "no_supported_format"}
     with open(log_file, "a") as f:
         f.write(json.dumps(log_entry) + "\n")
     
