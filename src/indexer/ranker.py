@@ -7,7 +7,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from functools import lru_cache
 
-from rust_bm25 import WandSearcher, analyze, decode_postings
+from rust_bm25 import WandSearcher, analyze
 from src.indexer.storage import IndexStorage
 from src.indexer.stopwords import load_stopwords
 
