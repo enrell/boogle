@@ -11,15 +11,9 @@ type LoaderData = {
 };
 
 export async function loader({ params }: LoaderFunctionArgs): Promise<LoaderData> {
-    const bookId = parseInt(params.id!);
-
-    try {
-        const bookId = parseInt(params.id!);
-        const bookData = await getBookMetadata(bookId);
-        return { book: bookData };
-    } catch (err) {
-        throw err;
-    }
+    const bookId = params.id!;
+    const bookData = await getBookMetadata(bookId);
+    return { book: bookData };
 }
 
 export const meta: MetaFunction = ({ data }) => {
