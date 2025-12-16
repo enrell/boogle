@@ -64,8 +64,6 @@ Boogle supports two database backends:
 4. **Start the API server:**
    ```bash
    uv run boogle api
-   # Or alternatively:
-   # uv run uvicorn src.api.main:app --reload
    ```
 
 5. **Try it out:**
@@ -112,6 +110,20 @@ Perfect for trying out Boogle without PostgreSQL:
 | `boogle api` | Start the FastAPI server | `--sqlite` |
 
 **Note:** The SQLite database is stored at `data/boogle.db` by default.
+
+---
+
+## 📊 Benchmarking
+
+You can run a performance benchmark to measure query latency, throughput (QPS), and index statistics:
+
+```bash
+uv run scripts/benchmark.py
+```
+
+Options:
+- `--iterations N`: Number of iterations per query (default: 5)
+- `--warmup N`: Number of warmup runs (default: 2)
 
 ---
 
