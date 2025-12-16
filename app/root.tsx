@@ -25,9 +25,12 @@ export const links: Route.LinksFunction = () => [
   },
 ];
 
+import { useTranslation } from "react-i18next";
+
 export function Layout({ children }: { children: React.ReactNode }) {
+  const { i18n } = useTranslation();
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang={i18n.language || "en"} dir={i18n.dir()} suppressHydrationWarning>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />

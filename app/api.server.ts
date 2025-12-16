@@ -1,30 +1,8 @@
 // Server-side API calls (used in loaders)
 import { API_URL } from "./config";
+import type { BookMetadata, SearchResult } from "./types";
 
-export interface BookMetadata {
-  source: string;
-  book_id: string;
-  url: string;
-  title: string | null;
-  author: string | null;
-  illustrator: string | null;
-  release_date: string | null;
-  language: string | null;
-  category: string | null;
-  original_publication: string | null;
-  credits: string | null;
-  copyright_status: string | null;
-  downloads: string | null;
-  files: Array<{ format: string; url: string }>;
-}
-
-export interface SearchResult {
-  book_id: string;
-  title: string;
-  author: string;
-  score: number;
-  url: string;
-}
+export type { BookMetadata, SearchResult };
 
 export async function getBookMetadata(bookId: string): Promise<BookMetadata> {
   const response = await fetch(`${API_URL}/metadata/gutenberg/${bookId}`);
@@ -34,8 +12,10 @@ export async function getBookMetadata(bookId: string): Promise<BookMetadata> {
   return response.json();
 }
 
-export async function searchBooks(query: string): Promise<SearchResult[]> {
-  const response = await fetch(`${API_URL}/search?query=${encodeURIComponent(query)}&limit=20`);
+export async function searchBooks(query: string, page: number = 1): Promise<SearchResult[]> {
+  const limit = 20;
+  const offset = (page - 1) * limit;
+  const response = await fetch(`${API_URL}/search?query=${encodeURIComponent(query)}&limit=${limit}&offset=${offset}`);
   if (!response.ok) {
     throw new Error(`Search failed: ${response.statusText}`);
   }

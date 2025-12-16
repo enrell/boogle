@@ -23,7 +23,7 @@ export function ThemeToggle() {
   return (
     <button
       onClick={cycleTheme}
-      className="p-2 rounded-full bg-gray-100 dark:bg-boogle-dark-lighter text-gray-800 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors border border-gray-200 dark:border-gray-700 outline-none focus:border-gray-300 dark:focus:border-gray-500"
+      className="p-2 rounded-full bg-gray-100 dark:bg-white/5 text-gray-800 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors border border-gray-200 dark:border-white/10 outline-none focus:ring-2 focus:ring-gray-200 dark:focus:ring-white/10"
       title={`Current theme: ${theme}`}
       aria-label="Toggle theme"
     >
