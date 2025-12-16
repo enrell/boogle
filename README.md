@@ -121,6 +121,12 @@ You can run a performance benchmark to measure query latency, throughput (QPS), 
 uv run scripts/benchmark.py
 ```
 
+## Benchmarking with SQLite
+
+```bash
+uv run scripts/benchmark.py --sqlite
+```
+
 Options:
 - `--iterations N`: Number of iterations per query (default: 5)
 - `--warmup N`: Number of warmup runs (default: 2)

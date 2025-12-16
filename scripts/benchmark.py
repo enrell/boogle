@@ -87,12 +87,18 @@ def get_index_stats(storage: IndexStorage) -> dict:
         stats["avg_postings_bytes"] = round(row["avg"] or 0, 1)
         
         # Table sizes
-        rows = conn.execute("""
-            SELECT relname, pg_total_relation_size(relid) as size
-            FROM pg_catalog.pg_statio_user_tables
-            WHERE relname LIKE 'idx_%'
-        """).fetchall()
-        stats["table_sizes"] = {r["relname"]: r["size"] for r in rows}
+        if storage.use_sqlite:
+             # SQLite specific size estimation
+             # Just use total DB size as a proxy or skip detailed table breakdown
+             import os
+             stats["table_sizes"] = {"sqlite_db_file": os.path.getsize(storage.dsn)}
+        else:
+            rows = conn.execute("""
+                SELECT relname, pg_total_relation_size(relid) as size
+                FROM pg_catalog.pg_statio_user_tables
+                WHERE relname LIKE 'idx_%'
+            """).fetchall()
+            stats["table_sizes"] = {r["relname"]: r["size"] for r in rows}
     
     # Globals
     stats["num_docs"] = int(storage.get_global("num_docs") or 0)
@@ -101,11 +107,11 @@ def get_index_stats(storage: IndexStorage) -> dict:
     return stats
 
 
-def run_benchmark(iterations: int = 3, warmup: int = 1) -> BenchmarkReport:
+def run_benchmark(iterations: int = 3, warmup: int = 1, use_sqlite: bool = False) -> BenchmarkReport:
     print("Initializing...")
     tracemalloc.start()
     
-    storage = IndexStorage()
+    storage = IndexStorage(use_sqlite=use_sqlite)
     ranker = Ranker(storage)
     
     # Warmup
@@ -209,7 +215,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--iterations", "-n", type=int, default=5)
     parser.add_argument("--warmup", "-w", type=int, default=2)
+    parser.add_argument("--sqlite", action="store_true", help="Use SQLite instead of PostgreSQL")
     args = parser.parse_args()
     
-    report, query_results, cache_stats = run_benchmark(args.iterations, args.warmup)
+    report, query_results, cache_stats = run_benchmark(args.iterations, args.warmup, args.sqlite)
     print_report(report, query_results, cache_stats)
