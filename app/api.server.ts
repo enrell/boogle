@@ -1,5 +1,4 @@
 // Server-side API calls (used in loaders)
-const API_URL = process.env.API_URL || "http://localhost:8000";
 
 export interface BookMetadata {
   source: string;
@@ -26,8 +25,14 @@ export interface SearchResult {
   url: string;
 }
 
+function getApiUrl(): string {
+  // Vite exposes env vars via import.meta.env
+  const url = import.meta.env.VITE_API_URL || "http://localhost:8000";
+  return url;
+}
+
 export async function getBookMetadata(bookId: string): Promise<BookMetadata> {
-  const response = await fetch(`${API_URL}/metadata/gutenberg/${bookId}`);
+  const response = await fetch(`${getApiUrl()}/metadata/gutenberg/${bookId}`);
   if (!response.ok) {
     throw new Error(`Book not found`);
   }
@@ -35,7 +40,7 @@ export async function getBookMetadata(bookId: string): Promise<BookMetadata> {
 }
 
 export async function searchBooks(query: string): Promise<SearchResult[]> {
-  const response = await fetch(`${API_URL}/search?query=${encodeURIComponent(query)}&limit=20`);
+  const response = await fetch(`${getApiUrl()}/search?query=${encodeURIComponent(query)}&limit=20`);
   if (!response.ok) {
     throw new Error(`Search failed: ${response.statusText}`);
   }
