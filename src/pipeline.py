@@ -2,46 +2,13 @@ import argparse
 import hashlib
 from pathlib import Path
 
-from rust_bm25 import analyze, encode_postings, chunk_text, parse_epub, parse_pdf, parse_txt
+from rust_bm25 import analyze, encode_postings, chunk_text, parse_epub, parse_pdf, parse_txt, process_batch
 
 from src.downloader.downloader import BookSeeder
 from src.indexer.storage import IndexStorage
 from src.indexer.stopwords import load_stopwords
 
-
 STOPWORDS = load_stopwords()
-
-
-def seed_corpus(output_dir: str, limit: int | None = None, batch_size: int = 200, workers: int = 16, refresh: bool = False):
-    seeder = BookSeeder(output_dir=output_dir, max_workers=workers)
-    if refresh:
-        updated = seeder.update_metadata(batch_size=batch_size)
-        print(f"Refreshed {updated} books")
-    total = seeder.seed_all(limit=limit, batch_size=batch_size)
-    print(f"Seeded {total} books")
-    return total
-
-
-def update_metadata(output_dir: str, batch_size: int = 100, workers: int = 16):
-    seeder = BookSeeder(output_dir=output_dir, max_workers=workers)
-    total = seeder.update_metadata(batch_size=batch_size)
-    print(f"Updated {total} books")
-    return total
-
-
-def file_hash(path: Path) -> str:
-    return hashlib.md5(path.read_bytes()).hexdigest()
-
-
-def parse_file(path: Path) -> str | None:
-    if path.suffix == ".epub":
-        return parse_epub(str(path))
-    elif path.suffix == ".pdf":
-        return parse_pdf(str(path))
-    elif path.suffix == ".txt":
-        return parse_txt(str(path))
-    return None
-
 
 def index_corpus(
     books_dir: str,
@@ -54,6 +21,7 @@ def index_corpus(
     total_files = len(book_files)
     
     storage = IndexStorage()
+    chunks_dir_str = str(storage.chunks_dir)
     
     if full:
         storage.clear()
@@ -61,79 +29,110 @@ def index_corpus(
     else:
         next_chunk_id = storage.get_next_chunk_id()
     
+    stopwords_list = list(STOPWORDS)
+    
     indexed = 0
     skipped = 0
     total_length = 0
-    terms_batch: dict[str, list[tuple[int, int]]] = {}
     
+    current_paths = []
+    current_ids = []
+    current_hashes = []
+    BATCH_SIZE = 100
+
+    def flush_batch():
+        nonlocal next_chunk_id, indexed, skipped, total_length
+        if not current_paths:
+            return
+            
+        print(f"Processing batch of {len(current_paths)} books in parallel...")
+        
+        try:
+            (chunk_records, terms_result, batch_len, batch_chunks_count) = process_batch(
+                current_paths,
+                current_ids,
+                chunk_size,
+                chunk_overlap,
+                next_chunk_id,
+                chunks_dir_str,
+                stopwords_list
+            )
+        except Exception as e:
+            print(f"Error processing batch: {e}")
+            # Fallback or skip?
+            return
+
+        if not chunk_records and batch_chunks_count == 0:
+            print("Batch produced no chunks.")
+            
+        # Insert chunks
+        storage.insert_chunks_batch(chunk_records)
+        
+        # Calculate book chunk counts for metadata
+        book_counts = {}
+        for _, bid in chunk_records:
+            book_counts[bid] = book_counts.get(bid, 0) + 1
+            
+        # Update indexed status
+        for bid, h in zip(current_ids, current_hashes):
+            cnt = book_counts.get(bid, 0)
+            storage.mark_book_indexed(bid, h, cnt)
+
+        # Insert terms
+        # Use merge=True always unless full index from scratch and this is the very first batch
+        do_merge = not (full and indexed == 0)
+        if terms_result:
+            storage.insert_terms_batch(terms_result, merge=do_merge)
+        
+        total_length += batch_len
+        next_chunk_id += batch_chunks_count
+        indexed += len(current_paths)
+        print(f"Indexed {indexed} books, {next_chunk_id} total chunks (skipped {skipped})")
+
     for idx, f in enumerate(book_files):
         book_id = f.stem
         fhash = file_hash(f)
         
-        # Skip if already indexed with same hash
         if not full and storage.is_book_indexed(book_id, fhash):
             skipped += 1
+            if skipped % 500 == 0:
+                print(f"Skipped {skipped} books...")
             continue
-        
-        # Parse file
-        text = parse_file(f)
-        if not text:
-            continue
-        
-        # Chunk text
-        chunks = chunk_text(text, chunk_size, chunk_overlap)
-        if not chunks:
-            continue
-        
-        # Save chunks to zstd file
-        storage.save_book_chunks(book_id, chunks)
-        
-        # Index chunks
-        chunk_records = []
-        for local_id, chunk in enumerate(chunks):
-            global_id = next_chunk_id + local_id
-            tokens = analyze(chunk)
-            total_length += len(tokens)
             
-            chunk_records.append((global_id, book_id))
+        current_paths.append(str(f))
+        current_ids.append(book_id)
+        current_hashes.append(fhash)
+        
+        if len(current_paths) >= BATCH_SIZE:
+            flush_batch()
+            current_paths = []
+            current_ids = []
+            current_hashes = []
             
-            term_freqs: dict[str, int] = {}
-            for token in tokens:
-                if token not in STOPWORDS:
-                    term_freqs[token] = term_freqs.get(token, 0) + 1
-            
-            for term, freq in term_freqs.items():
-                if term not in terms_batch:
-                    terms_batch[term] = []
-                terms_batch[term].append((global_id, freq))
-        
-        storage.insert_chunks_batch(chunk_records)
-        storage.mark_book_indexed(book_id, fhash, len(chunks))
-        
-        next_chunk_id += len(chunks)
-        indexed += 1
-        
-        if indexed % 100 == 0:
-            print(f"Indexed {indexed} books, {next_chunk_id} chunks (skipped {skipped})")
-    
-    # Save terms
-    if terms_batch:
-        print(f"Saving {len(terms_batch)} terms...")
-        terms_list = []
-        for term, postings in terms_batch.items():
-            terms_list.append((term, len(postings), encode_postings(postings)))
-            if len(terms_list) >= 10000:
-                storage.insert_terms_batch(terms_list, merge=not full)
-                terms_list = []
-        if terms_list:
-            storage.insert_terms_batch(terms_list, merge=not full)
+    flush_batch()
     
     # Update globals
     old_num = int(storage.get_global("num_docs") or 0)
     old_total = float(storage.get_global("total_length") or 0)
     
-    new_num = next_chunk_id
-    new_total = old_total + total_length
+    # If full, old values effectively 0/overwritten by current totals (since we started from 0)
+    if full:
+        new_num = next_chunk_id
+        new_total = total_length
+    else:
+        new_num = next_chunk_id # next_chunk_id started from old max + 1
+        # Wait, getting next_chunk_id from DB gave us MAX(id)+1.
+        # But global 'num_docs' might count actual documents or chunks?
+        # In this system, "document" = "chunk".
+        # So new_num should be total count.
+        # But if we started with `next_chunk_id`, that is the total count.
+        new_num = next_chunk_id
+        
+        # total_length should be additive
+        # But wait, storage.get_global("total_length") retrieves previous total.
+        # We should add what we processed.
+        new_total = old_total + total_length
+
     avgdl = new_total / new_num if new_num > 0 else 0
     
     storage.set_global("num_docs", str(new_num))
