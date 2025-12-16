@@ -8,15 +8,21 @@ name = "rust_bm25"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.22", features = ["extension-module"] }
+pyo3 = { version = "0.27.2", features = ["extension-module"] }
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0.145"
-bincode = "2.0.1"
+serde_json = "1.0"
+bincode = "2.0"
 rayon = "1.11.0"
 rustc-hash = "2.1.1"
 zip = "6.0.0"
 scraper = "0.25.0"
 regex = "1.12.2"
 pdf-extract = "0.10.0"
-zstd = "0.13.3"
+zstd = "0.13"
 md5 = "0.8.0"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+tokio-postgres = "0.7"
+glob = "0.3.3"
+futures = "0.3"
+bb8 = "0.8"
+bb8-postgres = "0.8"
