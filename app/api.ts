@@ -1,6 +1,13 @@
-const API_BASE_URL = import.meta.env.VITE_REACT_APP_API_URL;
+// Works both server-side and client-side
+const getApiUrl = () => {
+  if (typeof window !== "undefined") {
+    return import.meta.env.VITE_REACT_APP_API_URL || "http://localhost:8000";
+  }
+  return process.env.VITE_REACT_APP_API_URL || "http://localhost:8000";
+};
 
 export interface BookMetadata {
+  source: string;
   book_id: string;
   url: string;
   title: string | null;
@@ -28,21 +35,18 @@ export interface SearchResult {
 }
 
 export async function getBookMetadata(bookId: string): Promise<BookMetadata> {
-  const response = await fetch(`${API_BASE_URL}/metadata/gutenberg/${bookId}`);
+  const response = await fetch(`${getApiUrl()}/metadata/gutenberg/${bookId}`);
   if (!response.ok) {
-    throw new Error(`Book not found: ${response.statusText}`);
+    throw new Error(`Book not found`);
   }
   return response.json();
 }
 
 export async function searchBooks(query: string): Promise<SearchResult[]> {
-  const response = await fetch(`${API_BASE_URL}/search?query=${encodeURIComponent(query)}&limit=20`);
+  const response = await fetch(`${getApiUrl()}/search?query=${encodeURIComponent(query)}&limit=20`);
   if (!response.ok) {
     throw new Error(`Search failed: ${response.statusText}`);
   }
   const results = await response.json();
-  if (!results || results.length === 0) {
-    return [];
-  }
-  return results;
+  return results || [];
 }
