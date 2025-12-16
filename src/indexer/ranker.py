@@ -18,7 +18,7 @@ LENGTH_NORM = 1000
 SUM_TOP_N_WEIGHT = 0.2
 REFERENCE_PENALTY = 0.7
 STRONG_TITLE_BOOST = 1.3
-DF_THRESHOLD = 0.05  # Ignore terms appearing in >5% of docs
+DF_THRESHOLD = 0.90  # Ignore terms appearing in >90% of docs
 PHRASE_BOOST = 1.2   # Boost when all query terms in same chunk
 
 REFERENCE_KEYWORDS = {"dictionary", "encyclopedia", "lexicon", "glossary", "index", "catalog", "thesaurus", "concordance"}
@@ -69,7 +69,7 @@ class Ranker:
         return self._searcher
 
     def _is_dynamic_stopword(self, df: int) -> bool:
-        """Term is too common (>10% of docs)."""
+        """Term is too common (>90% of docs)."""
         return self._num_docs > 0 and df / self._num_docs > DF_THRESHOLD
 
     @lru_cache(maxsize=1000)
@@ -86,18 +86,25 @@ class Ranker:
         
         # 1. Get posting lists, filter dynamic stopwords
         posting_data = []
+        common_terms_data = [] # Fallback if everything is filtered
         filtered_terms = set()
         
         for token in query_set:
             term_data = self._get_term_cached(token)
             if term_data:
                 df, postings_blob = term_data
-                # Skip terms that appear in >5% of docs
+                # Skip terms that appear in >DF_THRESHOLD of docs
                 if self._is_dynamic_stopword(df):
                     filtered_terms.add(token)
+                    common_terms_data.append((df, postings_blob))
                     continue
                 posting_data.append((df, postings_blob))
         
+        # Fallback: if all terms were filtered (e.g. specialized corpus or very common terms), use them anyway
+        if not posting_data and common_terms_data:
+            posting_data = common_terms_data
+            filtered_terms.clear()
+
         if not posting_data:
             return []
         
@@ -131,11 +138,9 @@ class Ranker:
             author = meta.get("author", "")
             title_tokens = set(meta.get("title_tokens", []))
             
-            # Title boost
             title_matches = len(query_set & title_tokens)
             title_score = title_matches * 2.0
             
-            # Coverage boost based on title matches
             coverage = title_matches / len(query_set) if query_set else 0
             coverage_mult = 1.0 + COVERAGE_BOOST * coverage
             
@@ -156,7 +161,6 @@ class Ranker:
                 title_tokens=title_tokens
             ))
         
-        # 6. Aggregate by book
         books: dict[str, list[ChunkResult]] = defaultdict(list)
         for cr in chunk_results:
             books[cr.book_id].append(cr)
@@ -187,7 +191,6 @@ class Ranker:
                 best_chunk_id=best.doc_id
             ))
         
-        # 7. Sort and apply author diversity penalty
         book_results.sort(key=lambda x: x.score, reverse=True)
         
         author_counts: dict[str, int] = defaultdict(int)
