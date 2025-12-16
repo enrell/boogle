@@ -19,6 +19,13 @@ def seed_corpus(output_dir: str, limit: int | None = None, batch_size: int = 200
     return total
 
 
+def update_metadata(output_dir: str, batch_size: int = 100, workers: int = 16):
+    seeder = BookSeeder(output_dir=output_dir, max_workers=workers)
+    total = seeder.update_metadata(batch_size=batch_size)
+    print(f"Updated {total} books")
+    return total
+
+
 def file_hash(path: Path) -> str:
     return hashlib.md5(path.read_bytes()).hexdigest()
 
@@ -156,6 +163,11 @@ def main():
     seed_parser.add_argument('--batch-size', type=int, default=200)
     seed_parser.add_argument('--workers', type=int, default=16)
     
+    update_parser = subparsers.add_parser('update-metadata')
+    update_parser.add_argument('--output', default='data/books')
+    update_parser.add_argument('--batch-size', type=int, default=100)
+    update_parser.add_argument('--workers', type=int, default=16)
+    
     idx_parser = subparsers.add_parser('index')
     idx_parser.add_argument('--books-dir', default='data/books')
     idx_parser.add_argument('--chunk-size', type=int, default=1000)
@@ -170,6 +182,8 @@ def main():
     
     if args.command == 'seed':
         seed_corpus(args.output, args.limit, args.batch_size, args.workers)
+    elif args.command == 'update-metadata':
+        update_metadata(args.output, args.batch_size, args.workers)
     elif args.command == 'index':
         index_corpus(args.books_dir, args.chunk_size, args.chunk_overlap, args.full)
     elif args.command == 'search':

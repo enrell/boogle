@@ -124,6 +124,30 @@ class BookSeeder:
 
         return total
 
+    def update_metadata(self, batch_size: int = 100) -> int:
+        checkpoint_file = self.output_dir / ".checkpoint"
+        if not checkpoint_file.exists():
+            return 0
+
+        book_ids = checkpoint_file.read_text().splitlines()
+        total = len(book_ids)
+        updated = 0
+
+        for i in range(0, total, batch_size):
+            batch = book_ids[i:i + batch_size]
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                futures = {executor.submit(_fetch_metadata, bid): bid for bid in batch}
+                for future in as_completed(futures):
+                    try:
+                        meta = future.result()
+                        self.db.upsert_book(meta)
+                        updated += 1
+                    except Exception:
+                        pass
+            print(f"Updated {updated}/{total} books")
+
+        return updated
+
     def _process_batch(self, book_ids: list[str]) -> list[tuple[str, Path | None, dict, str | None]]:
         results = []
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
