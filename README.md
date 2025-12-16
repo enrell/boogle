@@ -17,6 +17,27 @@ and returns ranked results according to query relevance — just like a miniatur
 
 ---
 
+## ⚙️ Installation
+
+### Prerequisites
+
+- **[Rust](https://www.rust-lang.org/tools/install)** (latest stable)
+- **[uv](https://docs.astral.sh/uv/getting-started/installation/)** (fast Python package installer)
+
+### Setup
+
+1. **Install dependencies:**
+   ```bash
+   uv sync
+   ```
+
+2. **Build the Rust extension:**
+   ```bash
+   uv run maturin develop -m rust_bm25/Cargo.toml --release
+   ```
+
+---
+
 ## 🚀 Quick Start
 
 Boogle supports two database backends:
