@@ -10,6 +10,10 @@ from src.indexer.stopwords import load_stopwords
 
 STOPWORDS = load_stopwords()
 
+
+def file_hash(path: Path) -> str:
+    return hashlib.md5(path.read_bytes()).hexdigest()
+
 def index_corpus(
     books_dir: str,
     chunk_size: int = 1000,
@@ -66,7 +70,8 @@ def index_corpus(
             print("Batch produced no chunks.")
             
         # Insert chunks
-        storage.insert_chunks_batch(chunk_records)
+        if chunk_records:
+            storage.insert_chunks_batch(chunk_records)
         
         # Calculate book chunk counts for metadata
         book_counts = {}

@@ -15,7 +15,7 @@ use zip::ZipArchive;
 #[pyfunction]
 fn analyze(text: &str) -> Vec<String> {
     text.to_lowercase()
-        .split(|c: char| !c.is_ascii_alphabetic())
+        .split(|c: char| !c.is_alphabetic())
         .filter(|s| s.len() >= 2 && s.len() <= 30)
         .map(String::from)
         .collect()
