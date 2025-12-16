@@ -1,16 +1,96 @@
 import os
+import sqlite3
+import json
 from typing import Dict, List, Optional
+from pathlib import Path
 
 from psycopg.rows import dict_row
 from psycopg.types.json import Json
 from psycopg_pool import ConnectionPool
 
+# --- Sqlite Adapter Classes (mirrored from storage.py for standalone usage) ---
+class SqliteCursorAdapter:
+    def __init__(self, cursor):
+        self.cursor = cursor
+        
+    def execute(self, query, params=None):
+        query = query.replace("NOW()", "CURRENT_TIMESTAMP")
+        query = query.replace("%s", "?")
+        # Strip ::jsonb or similar casts if any
+        if params is None:
+            self.cursor.execute(query)
+        else:
+            # Handle Json wrapper manually if passed
+            new_params = []
+            for p in params:
+                 if hasattr(p, "obj"): # psycopg Json wrapper
+                     new_params.append(json.dumps(p.obj))
+                 elif isinstance(p, (dict, list)):
+                     new_params.append(json.dumps(p))
+                 else:
+                     new_params.append(p)
+            self.cursor.execute(query, new_params)
+        return self
+        
+    def fetchone(self):
+        row = self.cursor.fetchone()
+        if row is None:
+            return None
+        return dict(row)
+        
+    def fetchall(self):
+        rows = self.cursor.fetchall()
+        return [dict(row) for row in rows]
+        
+    def __getattr__(self, name):
+        return getattr(self.cursor, name)
+
+class SqliteConnectionAdapter:
+    def __init__(self, conn):
+        self.conn = conn
+        
+    def execute(self, query, params=None):
+        return self.cursor().execute(query, params)
+        
+    def commit(self):
+        self.conn.commit()
+    
+    def cursor(self):
+        return SqliteCursorAdapter(self.conn.cursor())
+        
+    def __enter__(self):
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type:
+            self.conn.rollback()
+        else:
+            self.conn.commit()
+
+class SqlitePoolAdapter:
+    def __init__(self, db_path):
+        self.db_path = db_path
+        
+    def connection(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return SqliteConnectionAdapter(conn)
+    
+    def close(self):
+        pass
 
 class PostgresRepository:
-    def __init__(self, dsn: Optional[str] = None):
-        self.dsn = dsn or self._build_dsn()
-        self.pool = ConnectionPool(self.dsn, kwargs={"row_factory": dict_row, "autocommit": True})
-        self._init_db()
+    def __init__(self, dsn: Optional[str] = None, use_sqlite: bool = False):
+        self.use_sqlite = use_sqlite or os.getenv("USE_SQLITE", "0") == "1"
+        if self.use_sqlite:
+            db_path = os.getenv("SQLITE_DB_PATH", "data/boogle.db")
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            self.pool = SqlitePoolAdapter(db_path)
+            self._init_sqlite_db()
+        else:
+            self.dsn = dsn or self._build_dsn()
+            self.pool = ConnectionPool(self.dsn, kwargs={"row_factory": dict_row, "autocommit": True})
+            self._init_postgres_db()
 
     def _build_dsn(self) -> str:
         url = os.getenv("DATABASE_URL")
@@ -23,7 +103,50 @@ class PostgresRepository:
         database = os.getenv("POSTGRES_DB", "boogle")
         return f"postgresql://{user}:{password}@{host}:{port}/{database}"
 
-    def _init_db(self) -> None:
+    def _init_sqlite_db(self) -> None:
+        with self.pool.connection() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS books (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source TEXT NOT NULL,
+                    book_id TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    title TEXT,
+                    author TEXT,
+                    illustrator TEXT,
+                    release_date TEXT,
+                    language TEXT,
+                    category TEXT,
+                    original_publication TEXT,
+                    credits TEXT,
+                    copyright_status TEXT,
+                    downloads TEXT,
+                    cover_url TEXT,
+                    files TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            # SQLite supports most ALTER TABLE commands now, but simpler creation is better.
+            # Assuming table structure matches.
+            
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS books_source_book_id_idx ON books (source, book_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS books_title_idx ON books (title)") # SQLite case insensitive? default no. Use COLLATE NOCASE?
+            conn.execute("CREATE INDEX IF NOT EXISTS books_author_idx ON books (author)")
+            
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS seed_offsets (
+                    source TEXT PRIMARY KEY,
+                    position INTEGER NOT NULL DEFAULT -1,
+                    last_book_id TEXT
+                )
+                """
+            )
+
+    def _init_postgres_db(self) -> None:
         with self.pool.connection() as conn:
             conn.execute(
                 """
@@ -76,6 +199,13 @@ class PostgresRepository:
                 )
                 """
             )
+    
+    def _init_db(self):
+        # Deprecated hook, routed
+        if self.use_sqlite:
+            self._init_sqlite_db()
+        else:
+            self._init_postgres_db()
 
     def upsert_book(self, metadata: Dict) -> None:
         source = metadata.get("source")
@@ -87,6 +217,10 @@ class PostgresRepository:
         cover_url = metadata.get("cover_url")
         if not cover_url and source == "gutenberg":
             cover_url = f"https://www.gutenberg.org/cache/epub/{source_book_id}/pg{source_book_id}.cover.medium.jpg"
+        
+        # files handling
+        files_val = Json(files) if not self.use_sqlite else json.dumps(files)
+        
         values = (
             source,
             source_book_id,
@@ -102,11 +236,10 @@ class PostgresRepository:
             metadata.get("copyright_status"),
             metadata.get("downloads"),
             cover_url,
-            Json(files),
+            files_val,
         )
-        with self.pool.connection() as conn:
-            conn.execute(
-                """
+        
+        query = """
                 INSERT INTO books (
                     source, book_id, url, title, author, illustrator, release_date,
                     language, category, original_publication, credits,
@@ -129,9 +262,14 @@ class PostgresRepository:
                     cover_url = EXCLUDED.cover_url,
                     files = EXCLUDED.files,
                     updated_at = NOW()
-                """,
-                values,
-            )
+                """
+        
+        if self.use_sqlite:
+             # SQLite doesn't use NOW()
+             query = query.replace("NOW()", "CURRENT_TIMESTAMP")
+
+        with self.pool.connection() as conn:
+            conn.execute(query, values)
 
     def get_book(self, source: str, book_id: str) -> Optional[Dict]:
         with self.pool.connection() as conn:
@@ -149,7 +287,16 @@ class PostgresRepository:
         if not row:
             return None
         data = dict(row)
-        data["files"] = data.get("files") or []
+        
+        files = data.get("files")
+        if self.use_sqlite and isinstance(files, str):
+            try:
+                data["files"] = json.loads(files)
+            except:
+                data["files"] = []
+        else:
+            data["files"] = files or []
+
         # Fallback cover URL
         if not data.get("cover_url") and source == "gutenberg":
             data["cover_url"] = f"https://www.gutenberg.org/cache/epub/{book_id}/pg{book_id}.cover.medium.jpg"
@@ -176,6 +323,7 @@ class PostgresRepository:
                 params,
             ).fetchall()
         return [dict(row) for row in rows]
+
 
     def get_seed_offset(self, source: str) -> tuple[int, Optional[str]]:
         with self.pool.connection() as conn:

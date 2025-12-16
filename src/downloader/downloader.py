@@ -75,13 +75,13 @@ def _download_book(book_id: str, output_dir: Path, log_file: Path) -> tuple[str,
 
 
 class BookSeeder:
-    def __init__(self, output_dir: str = "data/books", max_workers: int = 16):
+    def __init__(self, output_dir: str = "data/books", max_workers: int = 16, use_sqlite: bool = False):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.log_file = self.output_dir / "skipped.jsonl"
         self.scraper = GutenbergScraper()
         self.max_workers = max_workers
-        self.db = PostgresRepository()
+        self.db = PostgresRepository(use_sqlite=use_sqlite)
 
     def iter_all_book_ids(self, limit: int | None = None) -> Iterator[str]:
         yield from self.scraper.iter_book_ids(limit=limit)

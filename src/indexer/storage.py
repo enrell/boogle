@@ -1,4 +1,6 @@
 import os
+import sqlite3
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -11,15 +13,103 @@ from rust_bm25 import merge_postings
 CHUNKS_DIR = Path(os.getenv("CHUNKS_DIR", "data/chunks"))
 CACHE_MAX_BOOKS = int(os.getenv("CACHE_MAX_BOOKS", "500"))  # ~100MB for avg 200KB/book
 
+class SqliteCursorAdapter:
+    def __init__(self, cursor):
+        self.cursor = cursor
+        
+    def execute(self, query, params=None):
+        query = query.replace("%s", "?")
+        # Replace BYTEA with BLOB if creating tables
+        query = query.replace("BYTEA", "BLOB")
+        if params is None:
+            self.cursor.execute(query)
+        else:
+            self.cursor.execute(query, params)
+        return self
+        
+    def executemany(self, query, params_seq):
+        query = query.replace("%s", "?")
+        self.cursor.executemany(query, params_seq)
+        return self
+        
+    def fetchone(self):
+        row = self.cursor.fetchone()
+        if row is None:
+            return None
+        # Convert to dict
+        return dict(row)
+        
+    def fetchall(self):
+        rows = self.cursor.fetchall()
+        return [dict(row) for row in rows]
+        
+    def copy(self, query):
+        raise NotImplementedError("COPY not supported in SQLite")
+        
+    def __getattr__(self, name):
+        return getattr(self.cursor, name)
+
+class SqliteConnectionAdapter:
+    def __init__(self, conn):
+        self.conn = conn
+        
+    def execute(self, query, params=None):
+        cursor = self.conn.cursor()
+        query = query.replace("%s", "?")
+        query = query.replace("BYTEA", "BLOB") 
+        if params is None:
+            cursor.execute(query)
+        else:
+            cursor.execute(query, params)
+        # Return a cursor-like wrapper that can fetch results
+        return SqliteCursorAdapter(cursor)
+        
+    def commit(self):
+        self.conn.commit()
+    
+    def cursor(self):
+        return SqliteCursorAdapter(self.conn.cursor())
+        
+    def __enter__(self):
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type:
+            self.conn.rollback()
+        else:
+            self.conn.commit()
+
+class SqlitePoolAdapter:
+    def __init__(self, db_path):
+        self.db_path = db_path
+        
+    def connection(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return SqliteConnectionAdapter(conn)
+    
+    def close(self, timeout=None):
+        pass
+
 
 class IndexStorage:
-    def __init__(self, dsn: str | None = None):
-        self.dsn = dsn or self._build_dsn()
-        self.pool = ConnectionPool(self.dsn, min_size=1, max_size=10, kwargs={"row_factory": dict_row})
+    def __init__(self, dsn: str | None = None, use_sqlite: bool = False):
+        self.use_sqlite = use_sqlite or os.getenv("USE_SQLITE", "0") == "1"
+        
+        if self.use_sqlite:
+            db_path = os.getenv("SQLITE_DB_PATH", "data/boogle.db")
+            self.pool = SqlitePoolAdapter(db_path)
+            self.dsn = db_path
+        else:
+            self.dsn = dsn or self._build_dsn()
+            self.pool = ConnectionPool(self.dsn, min_size=1, max_size=10, kwargs={"row_factory": dict_row})
+            
         self.chunks_dir = CHUNKS_DIR
         self.chunks_dir.mkdir(parents=True, exist_ok=True)
         self._cctx = zstd.ZstdCompressor(level=9)
         self._dctx = zstd.ZstdDecompressor()
+        
+        # Initialize schema if needed (safe to call repeatedly)
         self._init_schema()
         
         # LRU cache for decompressed book chunks
@@ -88,9 +178,16 @@ class IndexStorage:
         if not book_ids:
             return {}
         with self.pool.connection() as conn:
-            rows = conn.execute(
-                "SELECT book_id, file_hash FROM idx_books_indexed WHERE book_id = ANY(%s)", (book_ids,)
-            ).fetchall()
+            if self.use_sqlite:
+                placeholders = ",".join("?" for _ in book_ids)
+                rows = conn.execute(
+                    f"SELECT book_id, file_hash FROM idx_books_indexed WHERE book_id IN ({placeholders})",
+                    book_ids
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT book_id, file_hash FROM idx_books_indexed WHERE book_id = ANY(%s)", (book_ids,)
+                ).fetchall()
         return {row["book_id"]: row["file_hash"] for row in rows}
 
     def mark_book_indexed(self, book_id: str, file_hash: str, chunk_count: int):
@@ -107,6 +204,7 @@ class IndexStorage:
             return
         with self.pool.connection() as conn:
             with conn.cursor() as cur:
+                # Syntax compatible with both modern SQLite and Postgres
                 cur.executemany("""
                     INSERT INTO idx_books_indexed (book_id, file_hash, chunk_count) VALUES (%s, %s, %s)
                     ON CONFLICT (book_id) DO UPDATE SET file_hash = EXCLUDED.file_hash, chunk_count = EXCLUDED.chunk_count
@@ -128,7 +226,12 @@ class IndexStorage:
 
     def clear(self):
         with self.pool.connection() as conn:
-            conn.execute("TRUNCATE idx_chunks, idx_terms, idx_globals")
+            if self.use_sqlite:
+                conn.execute("DELETE FROM idx_chunks")
+                conn.execute("DELETE FROM idx_terms")
+                conn.execute("DELETE FROM idx_globals")
+            else:
+                conn.execute("TRUNCATE idx_chunks, idx_terms, idx_globals")
             conn.commit()
         # Clear chunk files
         import shutil
@@ -185,23 +288,34 @@ class IndexStorage:
     def insert_chunks_batch(self, chunks: list[tuple[int, str]]):
         """Insert (chunk_id, book_id) tuples."""
         with self.pool.connection() as conn:
-            with conn.cursor().copy("COPY idx_chunks (chunk_id, book_id) FROM STDIN") as copy:
-                for chunk in chunks:
-                    copy.write_row(chunk)
-            conn.commit()
+            if self.use_sqlite:
+                with conn.cursor() as cur:
+                    cur.executemany("INSERT OR IGNORE INTO idx_chunks (chunk_id, book_id) VALUES (%s, %s)", chunks)
+                conn.commit()
+            else:
+                with conn.cursor().copy("COPY idx_chunks (chunk_id, book_id) FROM STDIN") as copy:
+                    for chunk in chunks:
+                        copy.write_row(chunk)
+                conn.commit()
 
     def insert_terms_batch(self, terms: list[tuple[str, int, bytes]], merge: bool = False):
         if not merge:
             with self.pool.connection() as conn:
                 with conn.cursor() as cur:
-                    cur.executemany("""
-                        INSERT INTO idx_terms (term, df, postings) VALUES (%s, %s, %s)
-                        ON CONFLICT (term) DO NOTHING
-                    """, terms)
+                    if self.use_sqlite:
+                        cur.executemany("""
+                            INSERT OR IGNORE INTO idx_terms (term, df, postings) VALUES (%s, %s, %s)
+                        """, terms)
+                    else:
+                        cur.executemany("""
+                            INSERT INTO idx_terms (term, df, postings) VALUES (%s, %s, %s)
+                            ON CONFLICT (term) DO NOTHING
+                        """, terms)
                 conn.commit()
             return
         
         term_names = [t[0] for t in terms]
+        # uses get_terms_batch, which we will fix
         existing = self.get_terms_batch(term_names)
         
         merged = []
@@ -215,6 +329,7 @@ class IndexStorage:
         
         with self.pool.connection() as conn:
             with conn.cursor() as cur:
+                # UPSERT syntax is same
                 cur.executemany("""
                     INSERT INTO idx_terms (term, df, postings) VALUES (%s, %s, %s)
                     ON CONFLICT (term) DO UPDATE SET df = EXCLUDED.df, postings = EXCLUDED.postings
@@ -226,9 +341,15 @@ class IndexStorage:
         if not chunk_ids:
             return {}
         with self.pool.connection() as conn:
-            rows = conn.execute(
-                "SELECT chunk_id, book_id FROM idx_chunks WHERE chunk_id = ANY(%s)", (chunk_ids,)
-            ).fetchall()
+            if self.use_sqlite:
+                placeholders = ",".join("?" for _ in chunk_ids)
+                rows = conn.execute(
+                    f"SELECT chunk_id, book_id FROM idx_chunks WHERE chunk_id IN ({placeholders})", chunk_ids
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT chunk_id, book_id FROM idx_chunks WHERE chunk_id = ANY(%s)", (chunk_ids,)
+                ).fetchall()
         return {row["chunk_id"]: row["book_id"] for row in rows}
 
     def get_term(self, term: str) -> tuple[int, bytes] | None:
@@ -242,9 +363,15 @@ class IndexStorage:
         if not terms:
             return {}
         with self.pool.connection() as conn:
-            rows = conn.execute(
-                "SELECT term, df, postings FROM idx_terms WHERE term = ANY(%s)", (terms,)
-            ).fetchall()
+            if self.use_sqlite:
+                placeholders = ",".join("?" for _ in terms)
+                rows = conn.execute(
+                    f"SELECT term, df, postings FROM idx_terms WHERE term IN ({placeholders})", terms
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT term, df, postings FROM idx_terms WHERE term = ANY(%s)", (terms,)
+                ).fetchall()
         return {row["term"]: (row["df"], bytes(row["postings"])) for row in rows}
 
     def get_books_metadata(self, book_ids: list[str]) -> dict[str, dict]:
@@ -252,9 +379,15 @@ class IndexStorage:
         if not book_ids:
             return {}
         with self.pool.connection() as conn:
-            rows = conn.execute(
-                "SELECT book_id, title, author FROM books WHERE book_id = ANY(%s)", (book_ids,)
-            ).fetchall()
+            if self.use_sqlite:
+                placeholders = ",".join("?" for _ in book_ids)
+                rows = conn.execute(
+                    f"SELECT book_id, title, author FROM books WHERE book_id IN ({placeholders})", book_ids
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT book_id, title, author FROM books WHERE book_id = ANY(%s)", (book_ids,)
+                ).fetchall()
         
         from rust_bm25 import analyze
         result = {}

@@ -22,7 +22,7 @@ and returns ranked results according to query relevance — just like a miniatur
 ```bash
 docker compose up -d db
 
-uv run boogle seed --limit 500
+uv run boogle seed --limit 1000
 
 uv run boogle index
 

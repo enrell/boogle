@@ -501,7 +501,7 @@ async fn insert_chunks(
 
 async fn insert_terms(
     client: &tokio_postgres::Transaction<'_>,
-    mut terms: FxHashMap<String, Vec<(u32, u32)>>,
+    terms: FxHashMap<String, Vec<(u32, u32)>>,
     merge: bool,
 ) -> PyResult<()> {
     let term_list: Vec<(String, i32, Vec<u8>)> = if !merge {
