@@ -5,17 +5,7 @@ from dataclasses import dataclass, field
 
 from rust_bm25 import analyze, decode_postings
 from src.indexer.storage import IndexStorage
-
-STOPWORDS = frozenset({
-    'the', 'be', 'to', 'of', 'and', 'in', 'that', 'have', 'it', 'for', 
-    'not', 'on', 'with', 'he', 'as', 'you', 'do', 'at', 'this', 'but', 
-    'his', 'by', 'from', 'they', 'we', 'say', 'her', 'she', 'or', 'an', 
-    'will', 'my', 'one', 'all', 'would', 'there', 'their', 'what', 'so', 
-    'up', 'out', 'if', 'about', 'who', 'get', 'which', 'go', 'me', 'is', 
-    'are', 'was', 'were', 'been', 'being', 'has', 'had', 'does', 'did', 
-    'a', 'am', 'can', 'could', 'may', 'might', 'must', 'shall', 'should',
-    'need', 'dare', 'ought', 'used', 'no', 'yes'
-})
+from src.indexer.stopwords import load_stopwords
 
 
 @dataclass 
@@ -54,7 +44,8 @@ class PgBM25Index:
         return idf * (self.k1 + 1)
 
     def search(self, query: str, top_k: int = 10) -> list[tuple[int, float, dict]]:
-        tokens = [t for t in analyze(query) if t not in STOPWORDS]
+        stopwords = load_stopwords()
+        tokens = [t for t in analyze(query) if t not in stopwords]
         if not tokens:
             return []
         
