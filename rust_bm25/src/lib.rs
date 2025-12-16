@@ -579,7 +579,7 @@ fn process_books_to_index(
     (docs_result, terms_result, total)
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, bincode::Encode, bincode::Decode)]
 struct IndexData {
     k1: f32,
     b: f32,
@@ -665,8 +665,8 @@ impl BM25Index {
     fn save(&self, path: &str) -> PyResult<()> {
         let file = File::create(path)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
-        let writer = BufWriter::new(file);
-        bincode::serialize_into(writer, &self.data)
+        let mut writer = BufWriter::new(file);
+        bincode::encode_into_std_write(&self.data, &mut writer, bincode::config::standard())
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
         Ok(())
     }
@@ -675,9 +675,10 @@ impl BM25Index {
     fn load(path: &str) -> PyResult<Self> {
         let file = File::open(path)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
-        let reader = BufReader::new(file);
-        let data: IndexData = bincode::deserialize_from(reader)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
+        let mut reader = BufReader::new(file);
+        let data: IndexData =
+            bincode::decode_from_std_read(&mut reader, bincode::config::standard())
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
         Ok(Self {
             data,
             pending: FxHashMap::default(),
@@ -719,102 +720,127 @@ fn process_batch(
     u64,
     u32,
 ) {
-    let stopwords_set: FxHashSet<String> = stopwords.into_iter().collect();
-    let next_doc_id = AtomicU32::new(start_doc_id);
-    let chunks_dir = Path::new(&chunks_dir);
+    // Do all the heavy parallel work inside allow_threads to release the GIL
+    let (all_chunk_records, all_terms_raw, total_len, count) = py.allow_threads(|| {
+        let stopwords_set: FxHashSet<String> = stopwords.into_iter().collect();
+        let next_doc_id = AtomicU32::new(start_doc_id);
+        let chunks_dir = Path::new(&chunks_dir);
 
-    let results: Vec<_> = paths
-        .into_par_iter()
-        .zip(book_ids.into_par_iter())
-        .map(|(path, book_id)| {
-            let text = match parse_file(&path) {
-                Some(t) => t,
-                None => return None,
-            };
+        let results: Vec<_> = paths
+            .into_par_iter()
+            .zip(book_ids.into_par_iter())
+            .map(|(path, book_id)| {
+                let text = match parse_file(&path) {
+                    Some(t) => t,
+                    None => return None,
+                };
 
-            let chunks = chunk_text(&text, chunk_size, overlap);
-            if chunks.is_empty() {
-                return None;
-            }
+                let chunks = chunk_text(&text, chunk_size, overlap);
+                if chunks.is_empty() {
+                    return None;
+                }
 
-            // Save chunks to zstd
-            // Match Python: shard = book_id[:2].zfill(2)
-            let shard_name = if book_id.len() < 2 {
-                format!("{:0>2}", book_id)
-            } else {
-                book_id[..2].to_string()
-            };
-            // If book_id was length 1 ("a"), format gives "0a". Perfect.
-            // If book_id was length 0 (""), format gives "00". Perfect.
+                // Save chunks to zstd
+                let shard_name = if book_id.len() < 2 {
+                    format!("{:0>2}", book_id)
+                } else {
+                    book_id[..2].to_string()
+                };
 
-            let shard_dir = chunks_dir.join(&shard_name);
-            std::fs::create_dir_all(&shard_dir).ok();
-            let chunk_path = shard_dir.join(format!("{}.zst", book_id));
+                let shard_dir = chunks_dir.join(&shard_name);
+                std::fs::create_dir_all(&shard_dir).ok();
+                let chunk_path = shard_dir.join(format!("{}.zst", book_id));
 
-            // Join with newlines for storage
-            let full_text = chunks.join("\n");
-            // Using level 3 (default) for speed/compression balance. 0 is default.
-            let compressed = zstd::stream::encode_all(full_text.as_bytes(), 0).unwrap_or_default();
-            std::fs::write(chunk_path, compressed).ok();
+                let full_text = chunks.join("\n");
+                let compressed =
+                    zstd::stream::encode_all(full_text.as_bytes(), 0).unwrap_or_default();
+                std::fs::write(chunk_path, compressed).ok();
 
-            let mut local_chunk_records = Vec::with_capacity(chunks.len());
-            let mut local_terms: FxHashMap<String, Vec<(u32, u32)>> = FxHashMap::default();
-            let mut local_len = 0u64;
+                let mut local_chunk_records = Vec::with_capacity(chunks.len());
+                let mut local_terms: FxHashMap<String, Vec<(u32, u32)>> = FxHashMap::default();
+                let mut local_len = 0u64;
 
-            for chunk in chunks {
-                let doc_id = next_doc_id.fetch_add(1, AtomicOrdering::SeqCst);
-                local_chunk_records.push((doc_id, book_id.clone()));
+                for chunk in chunks {
+                    let doc_id = next_doc_id.fetch_add(1, AtomicOrdering::SeqCst);
+                    local_chunk_records.push((doc_id, book_id.clone()));
 
-                let tokens = analyze(&chunk);
-                local_len += tokens.len() as u64;
+                    let tokens = analyze(&chunk);
+                    local_len += tokens.len() as u64;
 
-                let mut freq_map: FxHashMap<&str, u32> = FxHashMap::default();
-                for token in &tokens {
-                    if !stopwords_set.contains(token) {
-                        *freq_map.entry(token).or_insert(0) += 1;
+                    let mut freq_map: FxHashMap<&str, u32> = FxHashMap::default();
+                    for token in &tokens {
+                        if !stopwords_set.contains(token) {
+                            *freq_map.entry(token).or_insert(0) += 1;
+                        }
+                    }
+
+                    for (term, freq) in freq_map {
+                        local_terms
+                            .entry(term.to_string())
+                            .or_default()
+                            .push((doc_id, freq));
                     }
                 }
 
-                for (term, freq) in freq_map {
-                    local_terms
-                        .entry(term.to_string())
-                        .or_default()
-                        .push((doc_id, freq));
+                Some((local_chunk_records, local_terms, local_len))
+            })
+            .collect();
+
+        let mut all_chunk_records = Vec::new();
+        let mut all_terms: FxHashMap<String, Vec<(u32, u32)>> = FxHashMap::default();
+        let mut total_len = 0u64;
+
+        for res in results {
+            if let Some((recs, terms, len)) = res {
+                all_chunk_records.extend(recs);
+                total_len += len;
+                for (term, postings) in terms {
+                    all_terms.entry(term).or_default().extend(postings);
                 }
             }
-
-            Some((local_chunk_records, local_terms, local_len))
-        })
-        .collect();
-
-    let mut all_chunk_records = Vec::new();
-    let mut all_terms: FxHashMap<String, Vec<(u32, u32)>> = FxHashMap::default();
-    let mut total_len = 0u64;
-
-    for res in results {
-        if let Some((recs, terms, len)) = res {
-            all_chunk_records.extend(recs);
-            total_len += len;
-            for (term, postings) in terms {
-                all_terms.entry(term).or_default().extend(postings);
-            }
         }
-    }
 
-    let terms_result: Vec<_> = all_terms
+        let end_doc_id = next_doc_id.load(AtomicOrdering::SeqCst);
+        let count = end_doc_id - start_doc_id;
+
+        // Convert terms to raw bytes (Vec<u8>) instead of PyBytes inside the closure
+        let all_terms_raw: Vec<(String, u32, Vec<u8>)> = all_terms
+            .into_iter()
+            .map(|(term, postings)| {
+                let df = postings.len() as u32;
+                let encoded = encode_postings_internal(&postings);
+                (term, df, encoded)
+            })
+            .collect();
+
+        (all_chunk_records, all_terms_raw, total_len, count)
+    });
+
+    // Convert raw bytes to PyBytes (requires GIL, done outside allow_threads)
+    let terms_result: Vec<_> = all_terms_raw
         .into_iter()
-        .map(|(term, postings)| {
-            let df = postings.len() as u32;
-            let encoded = encode_postings_internal(&postings);
+        .map(|(term, df, encoded)| {
             let py_bytes = PyBytes::new_bound(py, &encoded).into();
             (term, df, py_bytes)
         })
         .collect();
 
-    let end_doc_id = next_doc_id.load(AtomicOrdering::SeqCst);
-    let count = end_doc_id - start_doc_id;
-
     (all_chunk_records, terms_result, total_len, count)
+}
+
+/// Calculate MD5 hashes for multiple files in parallel
+#[pyfunction]
+fn file_hashes_batch(py: Python<'_>, paths: Vec<String>) -> Vec<(String, String)> {
+    py.allow_threads(|| {
+        paths
+            .into_par_iter()
+            .filter_map(|path| {
+                let data = std::fs::read(&path).ok()?;
+                let hash = format!("{:x}", md5::compute(&data));
+                Some((path, hash))
+            })
+            .collect()
+    })
 }
 
 #[pymodule]
@@ -831,5 +857,6 @@ fn rust_bm25(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(chunk_text, m)?)?;
     m.add_function(wrap_pyfunction!(process_books_to_index, m)?)?;
     m.add_function(wrap_pyfunction!(process_batch, m)?)?;
+    m.add_function(wrap_pyfunction!(file_hashes_batch, m)?)?;
     Ok(())
 }

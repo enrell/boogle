@@ -2,7 +2,7 @@ import argparse
 import hashlib
 from pathlib import Path
 
-from rust_bm25 import analyze, encode_postings, chunk_text, parse_epub, parse_pdf, parse_txt, process_batch
+from rust_bm25 import analyze, encode_postings, chunk_text, parse_epub, parse_pdf, parse_txt, process_batch, file_hashes_batch
 
 from src.downloader.downloader import BookSeeder
 from src.indexer.storage import IndexStorage
@@ -10,9 +10,6 @@ from src.indexer.stopwords import load_stopwords
 
 STOPWORDS = load_stopwords()
 
-
-def file_hash(path: Path) -> str:
-    return hashlib.md5(path.read_bytes()).hexdigest()
 
 def index_corpus(
     books_dir: str,
@@ -23,6 +20,7 @@ def index_corpus(
     books_dir = Path(books_dir)
     book_files = list(books_dir.glob("*.epub")) + list(books_dir.glob("*.txt")) + list(books_dir.glob("*.pdf"))
     total_files = len(book_files)
+    print(f"Found {total_files} book files")
     
     storage = IndexStorage()
     chunks_dir_str = str(storage.chunks_dir)
@@ -35,21 +33,48 @@ def index_corpus(
     
     stopwords_list = list(STOPWORDS)
     
-    indexed = 0
-    skipped = 0
-    total_length = 0
+    # Calculate all hashes in parallel using Rust
+    print("Computing file hashes in parallel...")
+    all_paths = [str(f) for f in book_files]
+    hash_results = file_hashes_batch(all_paths)
+    path_to_hash = {p: h for p, h in hash_results}
     
-    current_paths = []
-    current_ids = []
-    current_hashes = []
+    # Build list of files to process
+    files_to_process = []
+    for f in book_files:
+        path_str = str(f)
+        book_id = f.stem
+        fhash = path_to_hash.get(path_str, "")
+        files_to_process.append((path_str, book_id, fhash))
+    
+    # If not full reindex, filter out already indexed books in batch
+    if not full:
+        print("Checking already indexed books...")
+        indexed_books = storage.get_indexed_books_batch([x[1] for x in files_to_process])
+        filtered = []
+        skipped = 0
+        for path_str, book_id, fhash in files_to_process:
+            if book_id in indexed_books and indexed_books[book_id] == fhash:
+                skipped += 1
+            else:
+                filtered.append((path_str, book_id, fhash))
+        files_to_process = filtered
+        print(f"Skipped {skipped} already indexed books")
+    else:
+        skipped = 0
+    
+    print(f"Processing {len(files_to_process)} books...")
+    
+    indexed = 0
+    total_length = 0
     BATCH_SIZE = 100
 
-    def flush_batch():
-        nonlocal next_chunk_id, indexed, skipped, total_length
+    def flush_batch(current_paths, current_ids, current_hashes):
+        nonlocal next_chunk_id, indexed, total_length
         if not current_paths:
             return
             
-        print(f"Processing batch of {len(current_paths)} books in parallel...")
+        print(f"Processing batch of {len(current_paths)} books...")
         
         try:
             (chunk_records, terms_result, batch_len, batch_chunks_count) = process_batch(
@@ -63,7 +88,6 @@ def index_corpus(
             )
         except Exception as e:
             print(f"Error processing batch: {e}")
-            # Fallback or skip?
             return
 
         if not chunk_records and batch_chunks_count == 0:
@@ -78,13 +102,10 @@ def index_corpus(
         for _, bid in chunk_records:
             book_counts[bid] = book_counts.get(bid, 0) + 1
             
-        # Update indexed status
-        for bid, h in zip(current_ids, current_hashes):
-            cnt = book_counts.get(bid, 0)
-            storage.mark_book_indexed(bid, h, cnt)
+        # Update indexed status in batch
+        storage.mark_books_indexed_batch([(bid, h, book_counts.get(bid, 0)) for bid, h in zip(current_ids, current_hashes)])
 
         # Insert terms
-        # Use merge=True always unless full index from scratch and this is the very first batch
         do_merge = not (full and indexed == 0)
         if terms_result:
             storage.insert_terms_batch(terms_result, merge=do_merge)
@@ -92,50 +113,33 @@ def index_corpus(
         total_length += batch_len
         next_chunk_id += batch_chunks_count
         indexed += len(current_paths)
-        print(f"Indexed {indexed} books, {next_chunk_id} total chunks (skipped {skipped})")
+        print(f"Indexed {indexed} books, {next_chunk_id} total chunks")
 
-    for idx, f in enumerate(book_files):
-        book_id = f.stem
-        fhash = file_hash(f)
-        
-        if not full and storage.is_book_indexed(book_id, fhash):
-            skipped += 1
-            if skipped % 500 == 0:
-                print(f"Skipped {skipped} books...")
-            continue
-            
-        current_paths.append(str(f))
+    current_paths = []
+    current_ids = []
+    current_hashes = []
+    
+    for path_str, book_id, fhash in files_to_process:
+        current_paths.append(path_str)
         current_ids.append(book_id)
         current_hashes.append(fhash)
         
         if len(current_paths) >= BATCH_SIZE:
-            flush_batch()
+            flush_batch(current_paths, current_ids, current_hashes)
             current_paths = []
             current_ids = []
             current_hashes = []
             
-    flush_batch()
+    flush_batch(current_paths, current_ids, current_hashes)
     
     # Update globals
-    old_num = int(storage.get_global("num_docs") or 0)
     old_total = float(storage.get_global("total_length") or 0)
     
-    # If full, old values effectively 0/overwritten by current totals (since we started from 0)
     if full:
         new_num = next_chunk_id
         new_total = total_length
     else:
-        new_num = next_chunk_id # next_chunk_id started from old max + 1
-        # Wait, getting next_chunk_id from DB gave us MAX(id)+1.
-        # But global 'num_docs' might count actual documents or chunks?
-        # In this system, "document" = "chunk".
-        # So new_num should be total count.
-        # But if we started with `next_chunk_id`, that is the total count.
         new_num = next_chunk_id
-        
-        # total_length should be additive
-        # But wait, storage.get_global("total_length") retrieves previous total.
-        # We should add what we processed.
         new_total = old_total + total_length
 
     avgdl = new_total / new_num if new_num > 0 else 0

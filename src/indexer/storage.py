@@ -83,12 +83,34 @@ class IndexStorage:
             ).fetchone()
         return row is not None and row["file_hash"] == file_hash
 
+    def get_indexed_books_batch(self, book_ids: list[str]) -> dict[str, str]:
+        """Get {book_id: file_hash} for multiple books."""
+        if not book_ids:
+            return {}
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT book_id, file_hash FROM idx_books_indexed WHERE book_id = ANY(%s)", (book_ids,)
+            ).fetchall()
+        return {row["book_id"]: row["file_hash"] for row in rows}
+
     def mark_book_indexed(self, book_id: str, file_hash: str, chunk_count: int):
         with self.pool.connection() as conn:
             conn.execute("""
                 INSERT INTO idx_books_indexed (book_id, file_hash, chunk_count) VALUES (%s, %s, %s)
                 ON CONFLICT (book_id) DO UPDATE SET file_hash = EXCLUDED.file_hash, chunk_count = EXCLUDED.chunk_count
             """, (book_id, file_hash, chunk_count))
+            conn.commit()
+
+    def mark_books_indexed_batch(self, books: list[tuple[str, str, int]]):
+        """Mark multiple books as indexed. books = [(book_id, file_hash, chunk_count), ...]"""
+        if not books:
+            return
+        with self.pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.executemany("""
+                    INSERT INTO idx_books_indexed (book_id, file_hash, chunk_count) VALUES (%s, %s, %s)
+                    ON CONFLICT (book_id) DO UPDATE SET file_hash = EXCLUDED.file_hash, chunk_count = EXCLUDED.chunk_count
+                """, books)
             conn.commit()
 
     def get_next_chunk_id(self) -> int:
