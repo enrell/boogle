@@ -19,26 +19,78 @@ and returns ranked results according to query relevance — just like a miniatur
 
 ## 🚀 Quick Start
 
-```bash
-docker compose up -d db
+Boogle supports two database backends:
+- **PostgreSQL** (recommended for production)
+- **SQLite** (perfect for demos, development, or environments without PostgreSQL)
 
-uv run boogle seed --limit 1000
+### Option 1: PostgreSQL Setup (Recommended)
 
-uv run boogle index
+1. **Start the database:**
+   ```bash
+   docker compose up -d db
+   ```
 
-uv run uvicorn src.api.main:app --reload
-```
+2. **Download books from Project Gutenberg:**
+   ```bash
+   uv run boogle seed --limit 1000
+   ```
 
-Visit `http://127.0.0.1:8000/docs` to try the API.
+3. **Build the search index:**
+   ```bash
+   uv run boogle index
+   ```
 
-### Commands
+4. **Start the API server:**
+   ```bash
+   uv run boogle api
+   # Or alternatively:
+   # uv run uvicorn src.api.main:app --reload
+   ```
 
-| Command | Description |
-|---------|-------------|
-| `boogle seed` | Download books from Gutenberg |
-| `boogle seed --refresh` | Update metadata for existing books |
-| `boogle index` | Build/update search index |
-| `boogle search "query"` | Search from CLI |
+5. **Try it out:**
+   - API Docs: `http://127.0.0.1:8000/docs`
+   - Search: `uv run boogle search "love and war"`
+
+### Option 2: SQLite Setup (No Docker Required!)
+
+Perfect for trying out Boogle without PostgreSQL:
+
+1. **Download books from Project Gutenberg:**
+   ```bash
+   uv run boogle seed --limit 1000 --sqlite
+   ```
+
+2. **Update metadata (important for SQLite!):**
+   ```bash
+   uv run boogle update-metadata --sqlite
+   ```
+
+3. **Build the search index:**
+   ```bash
+   uv run boogle index --full --sqlite
+   ```
+
+4. **Start the API server:**
+   ```bash
+   uv run boogle api --sqlite
+   ```
+
+5. **Try it out:**
+   - API Docs: `http://127.0.0.1:8000/docs`
+   - Search: `uv run boogle search "independence" --sqlite`
+
+### CLI Commands Reference
+
+| Command | Description | SQLite Flag |
+|---------|-------------|-------------|
+| `boogle seed --limit N` | Download N books from Gutenberg | `--sqlite` |
+| `boogle update-metadata` | Update metadata for downloaded books | `--sqlite` |
+| `boogle index` | Build/update search index | `--sqlite` |
+| `boogle index --full` | Full reindex (clears existing data) | `--sqlite` |
+| `boogle search "query"` | Search from CLI | `--sqlite` |
+| `boogle api` | Start the FastAPI server | `--sqlite` |
+
+**Note:** The SQLite database is stored at `data/boogle.db` by default.
 
 ---
 

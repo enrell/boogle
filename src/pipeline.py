@@ -163,14 +163,14 @@ def main():
     seed_parser = subparsers.add_parser('seed')
     seed_parser.add_argument('--output', default='data/books')
     seed_parser.add_argument('--limit', type=int, default=None)
-    seed_parser.add_argument('--batch-size', type=int, default=200)
+    seed_parser.add_argument('--batch-size', type=int, default=1000)
     seed_parser.add_argument('--workers', type=int, default=16)
     seed_parser.add_argument('--refresh', action='store_true')
     seed_parser.add_argument('--sqlite', action='store_true', help='Use SQLite instead of PostgreSQL')
     
     update_parser = subparsers.add_parser('update-metadata')
     update_parser.add_argument('--output', default='data/books')
-    update_parser.add_argument('--batch-size', type=int, default=100)
+    update_parser.add_argument('--batch-size', type=int, default=1000)
     update_parser.add_argument('--workers', type=int, default=16)
     update_parser.add_argument('--sqlite', action='store_true', help='Use SQLite instead of PostgreSQL')
     
@@ -178,7 +178,7 @@ def main():
     idx_parser.add_argument('--books-dir', default='data/books')
     idx_parser.add_argument('--chunk-size', type=int, default=1000)
     idx_parser.add_argument('--chunk-overlap', type=int, default=100)
-    idx_parser.add_argument('--batch-size', type=int, default=100)
+    idx_parser.add_argument('--batch-size', type=int, default=1000)
     idx_parser.add_argument('--full', action='store_true', help='Full reindex (clear existing)')
     idx_parser.add_argument('--sqlite', action='store_true', help='Use SQLite instead of PostgreSQL')
     
