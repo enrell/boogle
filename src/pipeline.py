@@ -12,8 +12,11 @@ from src.indexer.stopwords import load_stopwords
 STOPWORDS = load_stopwords()
 
 
-def seed_corpus(output_dir: str, limit: int | None = None, batch_size: int = 200, workers: int = 16):
+def seed_corpus(output_dir: str, limit: int | None = None, batch_size: int = 200, workers: int = 16, refresh: bool = False):
     seeder = BookSeeder(output_dir=output_dir, max_workers=workers)
+    if refresh:
+        updated = seeder.update_metadata(batch_size=batch_size)
+        print(f"Refreshed {updated} books")
     total = seeder.seed_all(limit=limit, batch_size=batch_size)
     print(f"Seeded {total} books")
     return total
@@ -162,6 +165,7 @@ def main():
     seed_parser.add_argument('--limit', type=int, default=None)
     seed_parser.add_argument('--batch-size', type=int, default=200)
     seed_parser.add_argument('--workers', type=int, default=16)
+    seed_parser.add_argument('--refresh', action='store_true')
     
     update_parser = subparsers.add_parser('update-metadata')
     update_parser.add_argument('--output', default='data/books')
@@ -181,7 +185,7 @@ def main():
     args = parser.parse_args()
     
     if args.command == 'seed':
-        seed_corpus(args.output, args.limit, args.batch_size, args.workers)
+        seed_corpus(args.output, args.limit, args.batch_size, args.workers, args.refresh)
     elif args.command == 'update-metadata':
         update_metadata(args.output, args.batch_size, args.workers)
     elif args.command == 'index':
