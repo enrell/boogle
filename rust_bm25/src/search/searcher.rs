@@ -20,7 +20,7 @@ pub struct FileSearcher {
 #[pymethods]
 impl FileSearcher {
     #[new]
-    fn new(index_dir: &str) -> PyResult<Self> {
+    pub fn new(index_dir: &str) -> PyResult<Self> {
         let path = Path::new(index_dir);
         let meta_path = path.join("index.json");
 
@@ -57,7 +57,7 @@ impl FileSearcher {
     }
 
     #[getter]
-    fn num_docs(&self) -> u32 {
+    pub fn num_docs(&self) -> u32 {
         self.total_docs
     }
 
@@ -66,7 +66,7 @@ impl FileSearcher {
         self.avgdl
     }
 
-    fn search(&self, query: &str, top_k: usize) -> Vec<(String, f32, u32)> {
+    pub fn search(&self, query: &str, top_k: usize) -> Vec<(String, f32, u32)> {
         // 1. Preprocessing
         let tokens: Vec<String> = analyze(query)
             .into_iter()
