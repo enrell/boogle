@@ -18,8 +18,9 @@ def load_stopwords() -> frozenset[str]:
         data = json.load(f)
     
     all_words: set[str] = set()
-    for lang_words in data.values():
-        all_words.update(w.lower() for w in lang_words)
+    for lang, lang_words in data.items():
+        if lang == 'en':
+            all_words.update(w.lower() for w in lang_words)
     
     _STOPWORDS = frozenset(all_words)
     return _STOPWORDS

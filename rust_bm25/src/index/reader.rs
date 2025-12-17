@@ -1,6 +1,7 @@
 use crate::codecs::decode_postings_separated;
 use crate::index::segment::SegmentMeta;
-use fst::Map as FstMap;
+use fst::automaton::Levenshtein;
+use fst::{IntoStreamer, Map as FstMap, Streamer};
 use memmap2::Mmap;
 use std::fs::{self, File};
 use std::path::Path;
@@ -91,6 +92,39 @@ impl SegmentReader {
         ))
     }
 
+    pub fn get_doc_freq(&self, term: &str) -> Option<u32> {
+        let term_idx = self.terms_fst.get(term)?;
+        // 28 bytes per term
+        let offset_pos = (term_idx as usize) * 28;
+
+        // doc_count is at offset + 24 (4 bytes)
+        self.read_u32(&self.offsets_mmap, offset_pos + 24)
+    }
+
+    pub fn get_postings_iter(&self, term: &str) -> Option<PostingsIter> {
+        let term_idx = self.terms_fst.get(term)?;
+        let offset_pos = (term_idx as usize) * 28;
+
+        let doc_offset = self.read_u64(&self.offsets_mmap, offset_pos)?;
+        let doc_len = self.read_u32(&self.offsets_mmap, offset_pos + 8)?;
+        let freq_offset = self.read_u64(&self.offsets_mmap, offset_pos + 12)?;
+        let freq_len = self.read_u32(&self.offsets_mmap, offset_pos + 20)?;
+        let doc_count = self.read_u32(&self.offsets_mmap, offset_pos + 24)?;
+
+        let doc_end = (doc_offset + doc_len as u64) as usize;
+        let freq_end = (freq_offset + freq_len as u64) as usize;
+
+        if doc_end > self.postings_docs_mmap.len() || freq_end > self.postings_freqs_mmap.len() {
+            return None;
+        }
+
+        Some(PostingsIter::new(
+            &self.postings_docs_mmap[doc_offset as usize..doc_end],
+            &self.postings_freqs_mmap[freq_offset as usize..freq_end],
+            doc_count as usize,
+        ))
+    }
+
     pub fn get_doc_length(&self, global_doc_id: u32) -> Option<u32> {
         let local_id = global_doc_id.checked_sub(self.base_doc_id)?;
         if local_id >= self.num_docs {
@@ -125,5 +159,149 @@ impl SegmentReader {
         std::str::from_utf8(self.chunks_mmap.get(data_start..data_end)?)
             .map(|s| s.to_string())
             .ok()
+    }
+
+    pub fn get_fuzzy_terms(&self, term: &str, max_dist: u32) -> Vec<String> {
+        let lev = match Levenshtein::new(term, max_dist) {
+            Ok(l) => l,
+            Err(_) => return vec![],
+        };
+
+        let mut stream = self.terms_fst.search(lev).into_stream();
+        let mut results = Vec::new();
+
+        while let Some((key, _)) = stream.next() {
+            if let Ok(s) = std::str::from_utf8(key) {
+                results.push(s.to_string());
+            }
+        }
+        results
+    }
+}
+
+use bitpacking::{BitPacker, BitPacker4x};
+const BLOCK_LEN: usize = 128;
+
+pub struct PostingsIter<'a> {
+    doc_data: &'a [u8],
+    freq_data: &'a [u8],
+    doc_pos: usize,
+    freq_pos: usize,
+
+    current_doc: u32,
+    count_left: usize,
+
+    // SIMD buffers
+    doc_buffer: [u32; BLOCK_LEN],
+    freq_buffer: [u32; BLOCK_LEN],
+    buffer_idx: usize,
+    buffer_len: usize,
+
+    bitpacker: BitPacker4x,
+}
+
+impl<'a> PostingsIter<'a> {
+    pub fn new(doc_data: &'a [u8], freq_data: &'a [u8], doc_count: usize) -> Self {
+        Self {
+            doc_data,
+            freq_data,
+            doc_pos: 0,
+            freq_pos: 0,
+            current_doc: 0,
+            count_left: doc_count,
+            doc_buffer: [0u32; BLOCK_LEN],
+            freq_buffer: [0u32; BLOCK_LEN],
+            buffer_idx: BLOCK_LEN, // Force refill on first next()
+            buffer_len: 0,
+            bitpacker: BitPacker4x::new(),
+        }
+    }
+
+    // Helper for varint decoding (copied from codecs to avoid pub dep)
+    fn decode_varint(&self, data: &[u8], mut pos: usize) -> (u32, usize) {
+        let mut result = 0u32;
+        let mut shift = 0;
+        loop {
+            if pos >= data.len() {
+                return (result, pos);
+            }
+            let byte = unsafe { *data.get_unchecked(pos) };
+            pos += 1;
+            result |= ((byte & 0x7F) as u32) << shift;
+            if byte & 0x80 == 0 {
+                break;
+            }
+            shift += 7;
+        }
+        (result, pos)
+    }
+
+    fn refill_buffer(&mut self) {
+        // If we have at least BLOCK_LEN items left, we used bitpacking
+        if self.count_left >= BLOCK_LEN {
+            // Docs
+            let doc_bits = self.doc_data[self.doc_pos];
+            self.doc_pos += 1;
+            let doc_bytes = (doc_bits as usize) * 16;
+            self.bitpacker.decompress(
+                &self.doc_data[self.doc_pos..self.doc_pos + doc_bytes],
+                &mut self.doc_buffer,
+                doc_bits,
+            );
+            self.doc_pos += doc_bytes;
+
+            // Freqs
+            let freq_bits = self.freq_data[self.freq_pos];
+            self.freq_pos += 1;
+            let freq_bytes = (freq_bits as usize) * 16;
+            self.bitpacker.decompress(
+                &self.freq_data[self.freq_pos..self.freq_pos + freq_bytes],
+                &mut self.freq_buffer,
+                freq_bits,
+            );
+            self.freq_pos += freq_bytes;
+
+            self.buffer_len = BLOCK_LEN;
+        } else {
+            // Remaining items are VarInt encoded
+            // We'll decode them one by one in next() or fill buffer here?
+            // Let's fill buffer to keep next() simple
+            for i in 0..self.count_left {
+                let (delta, new_pos) = self.decode_varint(self.doc_data, self.doc_pos);
+                self.doc_pos = new_pos;
+                self.doc_buffer[i] = delta;
+
+                let (tf, new_pos) = self.decode_varint(self.freq_data, self.freq_pos);
+                self.freq_pos = new_pos;
+                self.freq_buffer[i] = tf;
+            }
+            self.buffer_len = self.count_left;
+        }
+
+        self.buffer_idx = 0;
+    }
+}
+
+impl<'a> Iterator for PostingsIter<'a> {
+    type Item = (u32, u32);
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.count_left == 0 {
+            return None;
+        }
+
+        if self.buffer_idx >= self.buffer_len {
+            self.refill_buffer();
+        }
+
+        let delta = self.doc_buffer[self.buffer_idx];
+        let freq = self.freq_buffer[self.buffer_idx];
+
+        self.current_doc += delta;
+        self.buffer_idx += 1;
+        self.count_left -= 1;
+
+        Some((self.current_doc, freq))
     }
 }
