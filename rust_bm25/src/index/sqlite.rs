@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::runtime::Runtime;
 
-use crate::encoding::{decode_postings_internal, encode_postings_internal};
-use crate::parsers::process_single_book;
+use crate::codecs::{decode_postings_internal, encode_postings_internal};
+use crate::document::parsers::process_single_book; // Direct import as it was used directly
 use rusqlite::OptionalExtension;
 
 #[pyfunction]

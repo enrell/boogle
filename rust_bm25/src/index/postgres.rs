@@ -9,8 +9,8 @@ use std::time::Instant;
 use tokio::runtime::Runtime;
 
 use crate::analysis::analyze;
-use crate::encoding::{decode_postings_internal, encode_postings_internal};
-use crate::parsers::{chunk_text, parse_file};
+use crate::codecs::{decode_postings_internal, encode_postings_internal};
+use crate::document::parsers::{chunk_text, parse_file};
 
 /// Main indexing function - does everything in Rust
 #[pyfunction]

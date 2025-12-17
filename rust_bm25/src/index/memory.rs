@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicU32, Ordering as AtomicOrdering};
 use std::sync::Mutex;
 
 use crate::analysis::analyze;
-use crate::encoding::{decode_postings_internal, encode_postings_internal};
-use crate::parsers::{chunk_text, extract_json_field, parse_file};
+use crate::codecs::{decode_postings_internal, encode_postings_internal};
+use crate::document::parsers::{chunk_text, extract_json_field, parse_file};
 
 #[pyfunction]
 pub fn process_books_to_index(

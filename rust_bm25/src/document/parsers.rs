@@ -12,8 +12,6 @@ use std::path::Path;
 // Pre-compiled selector for better performance
 static BODY_SELECTOR: Lazy<Selector> = Lazy::new(|| Selector::parse("body").unwrap());
 
-/// Normalize whitespace: collapse multiple whitespace chars into single space and trim.
-/// This is ~2x faster than regex for this simple pattern.
 #[inline]
 fn normalize_whitespace(text: &str) -> String {
     let mut result = String::with_capacity(text.len());

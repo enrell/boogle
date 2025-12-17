@@ -1,42 +1,17 @@
 use crossbeam_channel::bounded;
 use dashmap::DashMap;
 use fst::Map as FstMap;
-use memmap2::Mmap;
 use pyo3::prelude::*;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::fs::{self, File};
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::path::Path;
 use std::thread;
 
-use crate::analysis::analyze;
-use crate::parsers::{chunk_text, parse_file};
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct SegmentMeta {
-    num_docs: u32,
-    base_doc_id: u32,
-    total_length: u64,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct IndexMeta {
-    segments: Vec<String>,
-    total_docs: u32,
-    avgdl: f32,
-}
-
-struct ProcessedDoc {
-    book_id: String,
-    chunks: Vec<(u32, FxHashMap<String, u32>)>,
-}
-
-struct BatchData {
-    segment_id: usize,
-    segment_dir: PathBuf,
-    docs: Vec<ProcessedDoc>,
-    base_doc_id: u32,
-}
+use crate::analysis::analyze_arena;
+use crate::codecs::encode_postings_separated;
+use crate::document::parsers::{chunk_text, parse_file};
+use crate::index::segment::{BatchData, IndexMeta, ProcessedDoc, SegmentMeta};
 
 fn write_segment(data: BatchData) -> std::io::Result<SegmentMeta> {
     fs::create_dir_all(&data.segment_dir)?;
@@ -79,7 +54,7 @@ fn write_segment(data: BatchData) -> std::io::Result<SegmentMeta> {
 
     let encoded_postings: Vec<(Vec<u8>, Vec<u8>)> = sorted_terms
         .par_iter()
-        .map(|(_, postings)| crate::encoding::encode_postings_separated(postings))
+        .map(|(_, postings)| encode_postings_separated(postings))
         .collect();
 
     let mut term_offsets: Vec<(&str, u64)> = Vec::with_capacity(sorted_terms.len());
@@ -160,272 +135,6 @@ fn write_segment(data: BatchData) -> std::io::Result<SegmentMeta> {
     fs::write(data.segment_dir.join("meta.json"), meta_json)?;
 
     Ok(meta)
-}
-
-struct SegmentReader {
-    terms_fst: FstMap<Mmap>,
-    offsets_mmap: Mmap,
-    postings_docs_mmap: Mmap,
-    postings_freqs_mmap: Mmap,
-    chunks_mmap: Mmap,
-    doc_lengths_mmap: Mmap,
-    base_doc_id: u32,
-    num_docs: u32,
-}
-
-impl SegmentReader {
-    fn open(segment_dir: &Path) -> std::io::Result<Self> {
-        let terms_file = File::open(segment_dir.join("terms.fst"))?;
-        let terms_mmap = unsafe { Mmap::map(&terms_file)? };
-        let terms_fst = FstMap::new(terms_mmap)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-        let offsets_file = File::open(segment_dir.join("offsets.bin"))?;
-        let offsets_mmap = unsafe { Mmap::map(&offsets_file)? };
-
-        let postings_docs_file = File::open(segment_dir.join("postings_docs.bin"))?;
-        let postings_docs_mmap = unsafe { Mmap::map(&postings_docs_file)? };
-
-        let postings_freqs_file = File::open(segment_dir.join("postings_freqs.bin"))?;
-        let postings_freqs_mmap = unsafe { Mmap::map(&postings_freqs_file)? };
-
-        let chunks_file = File::open(segment_dir.join("chunks.bin"))?;
-        let chunks_mmap = unsafe { Mmap::map(&chunks_file)? };
-
-        let lengths_file = File::open(segment_dir.join("doc_lengths.bin"))?;
-        let doc_lengths_mmap = unsafe { Mmap::map(&lengths_file)? };
-
-        let meta_str = fs::read_to_string(segment_dir.join("meta.json"))?;
-        let meta: SegmentMeta = serde_json::from_str(&meta_str)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
-        Ok(Self {
-            terms_fst,
-            offsets_mmap,
-            postings_docs_mmap,
-            postings_freqs_mmap,
-            chunks_mmap,
-            doc_lengths_mmap,
-            base_doc_id: meta.base_doc_id,
-            num_docs: meta.num_docs,
-        })
-    }
-
-    fn get_postings(&self, term: &str) -> Option<Vec<(u32, u32)>> {
-        let term_idx = self.terms_fst.get(term)?;
-        // 28 bytes per term: offset_doc(8) + len_doc(4) + offset_freq(8) + len_freq(4) + doc_count(4)
-        let offset_pos = (term_idx as usize) * 28;
-
-        if offset_pos + 28 > self.offsets_mmap.len() {
-            return None;
-        }
-
-        let doc_offset = u64::from_le_bytes(
-            self.offsets_mmap[offset_pos..offset_pos + 8]
-                .try_into()
-                .ok()?,
-        );
-        let doc_len = u32::from_le_bytes(
-            self.offsets_mmap[offset_pos + 8..offset_pos + 12]
-                .try_into()
-                .ok()?,
-        );
-        let freq_offset = u64::from_le_bytes(
-            self.offsets_mmap[offset_pos + 12..offset_pos + 20]
-                .try_into()
-                .ok()?,
-        );
-        let freq_len = u32::from_le_bytes(
-            self.offsets_mmap[offset_pos + 20..offset_pos + 24]
-                .try_into()
-                .ok()?,
-        );
-        let doc_count = u32::from_le_bytes(
-            self.offsets_mmap[offset_pos + 24..offset_pos + 28]
-                .try_into()
-                .ok()?,
-        );
-
-        let doc_end = (doc_offset + doc_len as u64) as usize;
-        let freq_end = (freq_offset + freq_len as u64) as usize;
-
-        if doc_end > self.postings_docs_mmap.len() || freq_end > self.postings_freqs_mmap.len() {
-            return None;
-        }
-
-        Some(crate::encoding::decode_postings_separated(
-            &self.postings_docs_mmap[doc_offset as usize..doc_end],
-            &self.postings_freqs_mmap[freq_offset as usize..freq_end],
-            doc_count as usize,
-        ))
-    }
-
-    fn get_doc_length(&self, global_doc_id: u32) -> Option<u32> {
-        let local_id = global_doc_id.checked_sub(self.base_doc_id)?;
-        if local_id >= self.num_docs {
-            return None;
-        }
-        let pos = (local_id as usize) * 4;
-        if pos + 4 > self.doc_lengths_mmap.len() {
-            return None;
-        }
-        Some(u32::from_le_bytes(
-            self.doc_lengths_mmap[pos..pos + 4].try_into().ok()?,
-        ))
-    }
-
-    fn get_book_id(&self, global_doc_id: u32) -> Option<String> {
-        let local_id = global_doc_id.checked_sub(self.base_doc_id)?;
-        if local_id >= self.num_docs {
-            return None;
-        }
-
-        let num_chunks = self.num_docs as usize;
-        let offsets_size = (num_chunks + 1) * 4;
-        if offsets_size > self.chunks_mmap.len() {
-            return None;
-        }
-
-        let start_pos = (local_id as usize) * 4;
-        let start = u32::from_le_bytes(self.chunks_mmap[start_pos..start_pos + 4].try_into().ok()?)
-            as usize;
-        let end = u32::from_le_bytes(
-            self.chunks_mmap[start_pos + 4..start_pos + 8]
-                .try_into()
-                .ok()?,
-        ) as usize;
-
-        let data_start = offsets_size + start;
-        let data_end = offsets_size + end;
-        if data_end > self.chunks_mmap.len() {
-            return None;
-        }
-
-        String::from_utf8(self.chunks_mmap[data_start..data_end].to_vec()).ok()
-    }
-}
-
-#[pyclass]
-pub struct FileSearcher {
-    segments: Vec<SegmentReader>,
-    total_docs: u32,
-    avgdl: f32,
-    k1: f32,
-    b: f32,
-    stopwords: FxHashSet<String>,
-}
-
-#[pymethods]
-impl FileSearcher {
-    #[new]
-    fn new(index_dir: &str) -> PyResult<Self> {
-        let path = Path::new(index_dir);
-        let meta_path = path.join("index.json");
-
-        let meta_str = fs::read_to_string(&meta_path).map_err(|e| {
-            pyo3::exceptions::PyIOError::new_err(format!("Cannot read index.json: {}", e))
-        })?;
-        let meta: IndexMeta = serde_json::from_str(&meta_str)
-            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
-
-        let mut segments = Vec::with_capacity(meta.segments.len());
-        for seg_name in &meta.segments {
-            let seg_dir = path.join(seg_name);
-            let reader = SegmentReader::open(&seg_dir).map_err(|e| {
-                pyo3::exceptions::PyIOError::new_err(format!(
-                    "Cannot open segment {}: {}",
-                    seg_name, e
-                ))
-            })?;
-            segments.push(reader);
-        }
-
-        Ok(Self {
-            segments,
-            total_docs: meta.total_docs,
-            avgdl: meta.avgdl,
-            k1: 1.5,
-            b: 0.75,
-            stopwords: FxHashSet::default(),
-        })
-    }
-
-    fn set_stopwords(&mut self, words: Vec<String>) {
-        self.stopwords = words.into_iter().collect();
-    }
-
-    #[getter]
-    fn num_docs(&self) -> u32 {
-        self.total_docs
-    }
-
-    #[getter]
-    fn avgdl(&self) -> f32 {
-        self.avgdl
-    }
-
-    fn search(&self, query: &str, top_k: usize) -> Vec<(String, f32, u32)> {
-        let tokens: Vec<String> = analyze(query)
-            .into_iter()
-            .filter(|t| !self.stopwords.contains(t))
-            .collect();
-
-        if tokens.is_empty() {
-            return vec![];
-        }
-
-        let mut doc_scores: FxHashMap<u32, f32> = FxHashMap::default();
-
-        for token in &tokens {
-            let mut total_df = 0u32;
-            let mut all_postings: Vec<(u32, u32)> = Vec::new();
-
-            for segment in &self.segments {
-                if let Some(postings) = segment.get_postings(token) {
-                    total_df += postings.len() as u32;
-                    all_postings.extend(postings);
-                }
-            }
-
-            if total_df == 0 {
-                continue;
-            }
-
-            let idf = ((self.total_docs as f32 - total_df as f32 + 0.5) / (total_df as f32 + 0.5)
-                + 1.0)
-                .ln();
-
-            for (doc_id, tf) in all_postings {
-                let doc_len = self
-                    .segments
-                    .iter()
-                    .find_map(|s| s.get_doc_length(doc_id))
-                    .unwrap_or(1) as f32;
-
-                let tf_f = tf as f32;
-                let numerator = tf_f * (self.k1 + 1.0);
-                let denominator = tf_f + self.k1 * (1.0 - self.b + self.b * doc_len / self.avgdl);
-                let score = idf * numerator / denominator;
-                *doc_scores.entry(doc_id).or_insert(0.0) += score;
-            }
-        }
-
-        let mut results: Vec<(u32, f32)> = doc_scores.into_iter().collect();
-        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        results.truncate(top_k);
-
-        results
-            .into_iter()
-            .filter_map(|(doc_id, score)| {
-                let book_id = self.segments.iter().find_map(|s| s.get_book_id(doc_id))?;
-                Some((book_id, score, doc_id))
-            })
-            .collect()
-    }
-
-    fn get_book_id(&self, chunk_id: u32) -> Option<String> {
-        self.segments.iter().find_map(|s| s.get_book_id(chunk_id))
-    }
 }
 
 fn spawn_writer_thread(
@@ -575,7 +284,7 @@ fn index_corpus_file_internal(
 
                 for chunk in &chunks {
                     bump.reset(); // Reuse memory for next chunk
-                    let tokens = crate::analysis::analyze_arena(chunk, &bump);
+                    let tokens = analyze_arena(chunk, &bump);
                     if tokens.is_empty() {
                         continue;
                     }

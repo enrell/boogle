@@ -3,7 +3,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
-use crate::encoding::decode_postings_internal;
+use crate::codecs::decode_postings_internal;
 
 struct TermInfo {
     idf: f32,

@@ -1,22 +1,22 @@
 use pyo3::prelude::*;
 
 mod analysis;
-mod encoding;
-mod file_index;
-mod memory_index;
-mod parsers;
-mod postgres_index;
+mod codecs;
+mod document;
+mod index;
 mod search;
-mod sqlite_index;
+mod store;
+mod util;
 
 use analysis::analyze;
-use encoding::{decode_postings, encode_postings, merge_postings};
-use file_index::{index_corpus_file, FileSearcher};
-use memory_index::{process_batch, process_books_to_index, BM25Index};
-use parsers::{chunk_text, file_hashes_batch, parse_epub, parse_pdf, parse_txt};
-use postgres_index::index_corpus;
-use search::WandSearcher;
-use sqlite_index::index_corpus_sqlite;
+use codecs::{decode_postings, encode_postings, merge_postings};
+use document::parsers::{chunk_text, file_hashes_batch, parse_epub, parse_pdf, parse_txt};
+use index::memory::{process_batch, process_books_to_index, BM25Index};
+use index::postgres::index_corpus;
+use index::sqlite::index_corpus_sqlite;
+use index::writer::index_corpus_file;
+use search::searcher::FileSearcher;
+use search::wand::WandSearcher;
 
 #[pymodule]
 fn rust_bm25(m: &Bound<'_, PyModule>) -> PyResult<()> {
