@@ -36,15 +36,13 @@ fn write_segment(data: BatchData) -> std::io::Result<SegmentMeta> {
         }
     }
 
-    let terms: DashMap<String, Vec<(u32, u32)>> = DashMap::with_capacity(500_000);
+    let mut terms: FxHashMap<String, Vec<(u32, u32)>> = FxHashMap::default();
 
-    chunk_freq_maps
-        .into_par_iter()
-        .for_each(|(doc_id, freq_map)| {
-            for (term, freq) in freq_map {
-                terms.entry(term).or_default().push((doc_id, freq));
-            }
-        });
+    for (doc_id, freq_map) in chunk_freq_maps {
+        for (term, freq) in freq_map {
+            terms.entry(term).or_default().push((doc_id, freq));
+        }
+    }
 
     let mut sorted_terms: Vec<(String, Vec<(u32, u32)>)> = terms
         .into_iter()
@@ -231,6 +229,8 @@ fn index_corpus_file_internal(
     let mut global_doc_id: u32 = 0;
     let mut indexed = 0u32;
 
+    let seen_hashes: DashMap<[u8; 32], ()> = DashMap::new();
+
     for (batch_idx, batch_start) in (0..total).step_by(batch_size).enumerate() {
         let batch_end = (batch_start + batch_size).min(total);
         let batch: Vec<_> = book_files[batch_start..batch_end].to_vec();
@@ -244,8 +244,6 @@ fn index_corpus_file_internal(
         let stopwords_clone = stopwords_set.clone();
         let chunks_dir_clone = chunks_dir.to_string();
         let base_doc_id = global_doc_id;
-
-        let seen_hashes: DashMap<[u8; 32], ()> = DashMap::new();
 
         let docs: Vec<ProcessedDoc> = batch
             .par_iter()
@@ -270,11 +268,11 @@ fn index_corpus_file_internal(
                     book_id[..2].to_string()
                 };
                 let shard_dir = Path::new(&chunks_dir_clone).join(&shard);
-                fs::create_dir_all(&shard_dir).ok();
+                fs::create_dir_all(&shard_dir).expect("Failed to create shard dir");
                 let chunk_path = shard_dir.join(format!("{}.zst", book_id));
                 let full_text = chunks.join("\n");
                 if let Ok(compressed) = zstd::stream::encode_all(full_text.as_bytes(), 3) {
-                    fs::write(chunk_path, compressed).ok();
+                    fs::write(chunk_path, compressed).expect("Failed to write chunk");
                 }
 
                 let mut chunk_data: Vec<(u32, FxHashMap<String, u32>)> =
@@ -334,6 +332,14 @@ fn index_corpus_file_internal(
             batch_start_time.elapsed(),
             num_docs,
             num_chunks
+        );
+
+        let elapsed = batch_start_time.elapsed();
+        let docs_per_sec = num_docs as f64 / elapsed.as_secs_f64();
+        println!(
+            "  -> Speed: {:.2} docs/sec | RAM Queue: {}/1",
+            docs_per_sec,
+            tx.len()
         );
 
         tx.send(batch_data).unwrap();

@@ -17,6 +17,18 @@ pub struct SegmentReader {
 }
 
 impl SegmentReader {
+    #[inline(always)]
+    fn read_u64(&self, mmap: &Mmap, pos: usize) -> Option<u64> {
+        mmap.get(pos..pos + 8)
+            .map(|slice| u64::from_le_bytes(slice.try_into().unwrap()))
+    }
+
+    #[inline(always)]
+    fn read_u32(&self, mmap: &Mmap, pos: usize) -> Option<u32> {
+        mmap.get(pos..pos + 4)
+            .map(|slice| u32::from_le_bytes(slice.try_into().unwrap()))
+    }
+
     pub fn open(segment_dir: &Path) -> std::io::Result<Self> {
         let terms_file = File::open(segment_dir.join("terms.fst"))?;
         let terms_mmap = unsafe { Mmap::map(&terms_file)? };
@@ -59,35 +71,11 @@ impl SegmentReader {
         // 28 bytes per term: offset_doc(8) + len_doc(4) + offset_freq(8) + len_freq(4) + doc_count(4)
         let offset_pos = (term_idx as usize) * 28;
 
-        if offset_pos + 28 > self.offsets_mmap.len() {
-            return None;
-        }
-
-        let doc_offset = u64::from_le_bytes(
-            self.offsets_mmap[offset_pos..offset_pos + 8]
-                .try_into()
-                .ok()?,
-        );
-        let doc_len = u32::from_le_bytes(
-            self.offsets_mmap[offset_pos + 8..offset_pos + 12]
-                .try_into()
-                .ok()?,
-        );
-        let freq_offset = u64::from_le_bytes(
-            self.offsets_mmap[offset_pos + 12..offset_pos + 20]
-                .try_into()
-                .ok()?,
-        );
-        let freq_len = u32::from_le_bytes(
-            self.offsets_mmap[offset_pos + 20..offset_pos + 24]
-                .try_into()
-                .ok()?,
-        );
-        let doc_count = u32::from_le_bytes(
-            self.offsets_mmap[offset_pos + 24..offset_pos + 28]
-                .try_into()
-                .ok()?,
-        );
+        let doc_offset = self.read_u64(&self.offsets_mmap, offset_pos)?;
+        let doc_len = self.read_u32(&self.offsets_mmap, offset_pos + 8)?;
+        let freq_offset = self.read_u64(&self.offsets_mmap, offset_pos + 12)?;
+        let freq_len = self.read_u32(&self.offsets_mmap, offset_pos + 20)?;
+        let doc_count = self.read_u32(&self.offsets_mmap, offset_pos + 24)?;
 
         let doc_end = (doc_offset + doc_len as u64) as usize;
         let freq_end = (freq_offset + freq_len as u64) as usize;
@@ -109,12 +97,7 @@ impl SegmentReader {
             return None;
         }
         let pos = (local_id as usize) * 4;
-        if pos + 4 > self.doc_lengths_mmap.len() {
-            return None;
-        }
-        Some(u32::from_le_bytes(
-            self.doc_lengths_mmap[pos..pos + 4].try_into().ok()?,
-        ))
+        self.read_u32(&self.doc_lengths_mmap, pos)
     }
 
     pub fn get_book_id(&self, global_doc_id: u32) -> Option<String> {
@@ -130,13 +113,8 @@ impl SegmentReader {
         }
 
         let start_pos = (local_id as usize) * 4;
-        let start = u32::from_le_bytes(self.chunks_mmap[start_pos..start_pos + 4].try_into().ok()?)
-            as usize;
-        let end = u32::from_le_bytes(
-            self.chunks_mmap[start_pos + 4..start_pos + 8]
-                .try_into()
-                .ok()?,
-        ) as usize;
+        let start = self.read_u32(&self.chunks_mmap, start_pos)? as usize;
+        let end = self.read_u32(&self.chunks_mmap, start_pos + 4)? as usize;
 
         let data_start = offsets_size + start;
         let data_end = offsets_size + end;
@@ -144,6 +122,8 @@ impl SegmentReader {
             return None;
         }
 
-        String::from_utf8(self.chunks_mmap[data_start..data_end].to_vec()).ok()
+        std::str::from_utf8(self.chunks_mmap.get(data_start..data_end)?)
+            .map(|s| s.to_string())
+            .ok()
     }
 }

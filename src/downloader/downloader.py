@@ -42,16 +42,18 @@ def _fetch_metadata(book_id: str) -> dict:
         return {"book_id": book_id, "source": "gutenberg", "url": f"https://www.gutenberg.org/ebooks/{book_id}"}
 
 
-def _download_book(book_id: str, output_dir: Path, log_file: Path) -> tuple[str, Path | None, dict, str | None]:
+def _download_book(book_id: str, output_dir: Path, log_file: Path, pre_meta: dict | None = None) -> tuple[str, Path | None, dict, str | None]:
     session = _get_session()
     base_url = f"https://www.gutenberg.org/ebooks/{book_id}"
+    
+    # Use pre_meta if available to avoid scraping
+    meta = pre_meta.copy() if pre_meta else _fetch_metadata(book_id)
     
     for fmt_type, suffix in FORMAT_PRIORITY:
         ext = ".txt" if fmt_type == "txt" else f".{fmt_type}"
         filepath = output_dir / f"{book_id}{ext}"
         
         if filepath.exists():
-            meta = _fetch_metadata(book_id)
             meta["format"] = fmt_type
             return book_id, filepath, meta, fmt_type
         
@@ -60,13 +62,15 @@ def _download_book(book_id: str, output_dir: Path, log_file: Path) -> tuple[str,
             resp = session.get(url, timeout=30, allow_redirects=True)
             if resp.status_code == 200 and len(resp.content) > 100:
                 filepath.write_bytes(resp.content)
-                meta = _fetch_metadata(book_id)
                 meta["format"] = fmt_type
                 return book_id, filepath, meta, fmt_type
         except requests.RequestException:
             continue
     
-    meta = _fetch_metadata(book_id)
+    # Final check if we really need to scrape for metadata (fallback)
+    if not pre_meta:
+        meta = _fetch_metadata(book_id)
+
     log_entry = {"book_id": book_id, "url": base_url, "title": meta.get("title"), "reason": "no_supported_format"}
     with open(log_file, "a") as f:
         f.write(json.dumps(log_entry) + "\n")
@@ -83,10 +87,10 @@ class BookSeeder:
         self.max_workers = max_workers
         self.db = PostgresRepository(use_sqlite=use_sqlite)
 
-    def iter_all_book_ids(self, limit: int | None = None) -> Iterator[str]:
-        yield from self.scraper.iter_book_ids(limit=limit)
+    def iter_all_books(self, limit: int | None = None) -> Iterator[dict]:
+        yield from self.scraper.iter_book_metadata(limit=limit)
 
-    def seed_all(self, limit: int | None = None, batch_size: int = 200) -> int:
+    def seed_all(self, limit: int | None = None, batch_size: int = 500) -> int:
         checkpoint_file = self.output_dir / ".checkpoint"
 
         downloaded_ids = set()
@@ -96,18 +100,19 @@ class BookSeeder:
         total = 0
         batch = []
 
-        for book_id in self.iter_all_book_ids(limit=limit):
+        for meta in self.iter_all_books(limit=limit):
+            book_id = meta['book_id']
             if book_id in downloaded_ids:
                 continue
-            batch.append(book_id)
+            batch.append(meta)
 
             if len(batch) >= batch_size:
                 results = self._process_batch(batch)
-                for bid, path, meta, fmt in results:
+                for bid, path, meta_res, fmt in results:
                     if path:
                         downloaded_ids.add(bid)
                         total += 1
-                    self.db.upsert_book(meta)
+                    self.db.upsert_book(meta_res)
 
                 checkpoint_file.write_text("\n".join(downloaded_ids))
                 print(f"Seeded {total} books")
@@ -115,11 +120,11 @@ class BookSeeder:
 
         if batch:
             results = self._process_batch(batch)
-            for bid, path, meta, fmt in results:
+            for bid, path, meta_res, fmt in results:
                 if path:
                     downloaded_ids.add(bid)
                     total += 1
-                self.db.upsert_book(meta)
+                self.db.upsert_book(meta_res)
             checkpoint_file.write_text("\n".join(downloaded_ids))
 
         return total
@@ -148,12 +153,12 @@ class BookSeeder:
 
         return updated
 
-    def _process_batch(self, book_ids: list[str]) -> list[tuple[str, Path | None, dict, str | None]]:
+    def _process_batch(self, batch_meta: list[dict]) -> list[tuple[str, Path | None, dict, str | None]]:
         results = []
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {
-                executor.submit(_download_book, bid, self.output_dir, self.log_file): bid
-                for bid in book_ids
+                executor.submit(_download_book, m['book_id'], self.output_dir, self.log_file, m): m
+                for m in batch_meta
             }
             for future in as_completed(futures):
                 try:

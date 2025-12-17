@@ -25,7 +25,10 @@ def main():
     print("=" * 60)
     
     books_dir = Path("data/books")
-    all_files = sorted(glob(str(books_dir / "*.epub")))[:2000]
+    all_files = []
+    for ext in ["*.epub", "*.txt", "*.pdf"]:
+        all_files.extend(glob(str(books_dir / ext)))
+    all_files = sorted(all_files)[:2000]
     
     print(f"Symlinking {len(all_files)} files to {bench_books_dir}...")
     for src in all_files:

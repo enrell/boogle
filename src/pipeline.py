@@ -8,7 +8,7 @@ from src.downloader.downloader import BookSeeder
 from src.indexer.stopwords import load_stopwords
 
 
-def seed_corpus(output_dir: str, limit: int | None = None, batch_size: int = 200, workers: int = 16, refresh: bool = False, use_sqlite: bool = False):
+def seed_corpus(output_dir: str, limit: int | None = None, batch_size: int = 500, workers: int = 50, refresh: bool = False, use_sqlite: bool = False):
     seeder = BookSeeder(output_dir=output_dir, max_workers=workers, use_sqlite=use_sqlite)
     if refresh:
         updated = seeder.update_metadata(batch_size=batch_size)

@@ -3,15 +3,16 @@ use pyo3::types::PyBytes;
 use rkyv::{Archive, Deserialize, Serialize as RkyvSerialize};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
+
+use crate::analysis::analyze;
+use crate::codecs::{decode_postings_internal, encode_postings_internal};
+use crate::document::parsers::{chunk_text, parse_file};
+use rayon::prelude::*;
+use serde_json::json;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering as AtomicOrdering};
-use std::sync::Mutex;
-
-use crate::analysis::analyze;
-use crate::codecs::{decode_postings_internal, encode_postings_internal};
-use crate::document::parsers::{chunk_text, extract_json_field, parse_file};
 
 #[pyfunction]
 pub fn process_books_to_index(
@@ -25,82 +26,86 @@ pub fn process_books_to_index(
     Vec<(String, u32, Py<PyBytes>)>,
     u64,
 ) {
-    let terms: Mutex<FxHashMap<String, Vec<(u32, u32)>>> = Mutex::new(FxHashMap::default());
-    let docs: Mutex<Vec<(u32, u32, String)>> = Mutex::new(Vec::new());
-    let total_length: Mutex<u64> = Mutex::new(0);
-    let doc_counter: Mutex<u32> = Mutex::new(0);
+    let doc_counter = AtomicU32::new(0);
 
-    paths
-        .into_iter()
-        .zip(metadatas.into_iter())
-        .for_each(|(path, base_meta)| {
+    // Parallel processing with Rayon
+    let results: Vec<_> = paths
+        .into_par_iter()
+        .zip(metadatas.into_par_iter())
+        .map(|(path, base_meta)| {
             let text = match parse_file(&path) {
                 Some(t) => t,
-                None => return,
+                None => return (Vec::new(), FxHashMap::default(), 0),
             };
 
-            let title = extract_json_field(&base_meta, "title").unwrap_or_default();
-            let author = extract_json_field(&base_meta, "author").unwrap_or_default();
+            // Parse base metadata once using serde_json
+            let meta_obj: serde_json::Value = serde_json::from_str(&base_meta).unwrap_or(json!({}));
+
+            let title = meta_obj
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            let author = meta_obj
+                .get("author")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+
             let title_tokens: Vec<String> = analyze(&format!("{} {}", title, author));
-            let title_tokens_json: String = title_tokens
-                .iter()
-                .map(|t| format!("\"{}\"", t))
-                .collect::<Vec<_>>()
-                .join(",");
 
             let chunks = chunk_text(&text, chunk_size, overlap);
+
+            let mut local_docs = Vec::with_capacity(chunks.len());
+            let mut local_terms: FxHashMap<String, Vec<(u32, u32)>> = FxHashMap::default();
+            let mut local_len = 0u64;
 
             for chunk in chunks {
                 let tokens = analyze(&chunk);
                 let doc_length = tokens.len() as u32;
 
-                let doc_id = {
-                    let mut counter = doc_counter.lock().unwrap();
-                    let id = *counter;
-                    *counter += 1;
-                    id
-                };
+                let doc_id = doc_counter.fetch_add(1, AtomicOrdering::SeqCst);
 
-                let meta = format!(
-                    "{},\"chunk_id\":{},\"title_tokens\":[{}]}}",
-                    &base_meta[..base_meta.len() - 1],
-                    doc_id,
-                    title_tokens_json
-                );
+                // Clone the base object and add chunk-specific fields
+                let mut chunk_meta = meta_obj.clone();
+                chunk_meta["chunk_id"] = json!(doc_id);
+                chunk_meta["title_tokens"] = json!(title_tokens);
 
-                {
-                    let mut docs_lock = docs.lock().unwrap();
-                    docs_lock.push((doc_id, doc_length, meta));
-                }
+                // Remove newlines to keep it safe for line-based storage if needed
+                let meta_str = chunk_meta.to_string();
 
-                {
-                    let mut total = total_length.lock().unwrap();
-                    *total += doc_length as u64;
-                }
+                local_docs.push((doc_id, doc_length, meta_str));
+                local_len += doc_length as u64;
 
                 let mut term_freqs: FxHashMap<&str, u32> = FxHashMap::default();
                 for token in &tokens {
                     *term_freqs.entry(token.as_str()).or_insert(0) += 1;
                 }
 
-                {
-                    let mut terms_lock = terms.lock().unwrap();
-                    for (term, freq) in term_freqs {
-                        terms_lock
-                            .entry(term.to_string())
-                            .or_default()
-                            .push((doc_id, freq));
-                    }
+                for (term, freq) in term_freqs {
+                    local_terms
+                        .entry(term.to_string())
+                        .or_default()
+                        .push((doc_id, freq));
                 }
             }
-        });
 
-    let docs_result = docs.into_inner().unwrap();
-    let total = *total_length.lock().unwrap();
+            (local_docs, local_terms, local_len)
+        })
+        .collect();
 
-    let terms_result: Vec<_> = terms
-        .into_inner()
-        .unwrap()
+    // Merge results
+    let mut all_docs = Vec::new();
+    let mut all_terms: FxHashMap<String, Vec<(u32, u32)>> = FxHashMap::default();
+    let mut total_length = 0u64;
+
+    for (docs, terms, len) in results {
+        all_docs.extend(docs);
+        total_length += len;
+        for (term, postings) in terms {
+            all_terms.entry(term).or_default().extend(postings);
+        }
+    }
+
+    let terms_result: Vec<_> = all_terms
         .into_iter()
         .map(|(term, postings)| {
             let df = postings.len() as u32;
@@ -110,7 +115,7 @@ pub fn process_books_to_index(
         })
         .collect();
 
-    (docs_result, terms_result, total)
+    (all_docs, terms_result, total_length)
 }
 
 #[derive(Archive, RkyvSerialize, Deserialize, SerdeSerialize, SerdeDeserialize, Default)]
@@ -267,8 +272,8 @@ pub fn process_batch(
         let chunks_dir = Path::new(&chunks_dir);
 
         let results: Vec<_> = paths
-            .into_iter()
-            .zip(book_ids.into_iter())
+            .into_par_iter()
+            .zip(book_ids.into_par_iter())
             .map(|(path, book_id)| {
                 let text = match parse_file(&path) {
                     Some(t) => t,

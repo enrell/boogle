@@ -131,16 +131,49 @@ class GutenbergScraper:
         
         return results
 
-    def iter_book_ids(self, limit: int | None = None) -> Iterator[str]:
+    def iter_book_metadata(self, limit: int | None = None) -> Iterator[Dict]:
         feed_url = f"{self.base_url}/cache/epub/feeds/pg_catalog.csv"
-        text = self.fetch(feed_url)
-        reader = csv.DictReader(text.splitlines())
-        count = 0
-        for row in reader:
-            book_id = row.get("Text#")
-            if not book_id:
-                continue
-            yield book_id
-            count += 1
-            if limit and count >= limit:
-                break
+        
+        # Stream the CSV to avoid loading 100MB+ into RAM
+        with requests.get(feed_url, headers={'User-Agent': 'Mozilla/5.0'}, stream=True) as r:
+            r.raise_for_status()
+            # Decode lines on the fly
+            lines = (line.decode('utf-8', errors='replace') for line in r.iter_lines())
+            
+            # Skip BOM if present
+            try:
+                first_line = next(lines)
+                if first_line.startswith('\ufeff'):
+                    first_line = first_line[1:]
+                from itertools import chain
+                lines = chain([first_line], lines)
+            except StopIteration:
+                return
+
+            reader = csv.DictReader(lines)
+            count = 0
+            for row in reader:
+                book_id = row.get("Text#")
+                if not book_id:
+                    continue
+                    
+                meta = {
+                    'source': 'gutenberg',
+                    'book_id': str(book_id),
+                    'url': f"https://www.gutenberg.org/ebooks/{book_id}",
+                    'title': row.get("Title"),
+                    'author': row.get("Authors"),
+                    'language': row.get("Language"),
+                    'category': row.get("Subjects"),
+                    'release_date': row.get("Issued"),
+                    'files': []
+                }
+                
+                yield meta
+                count += 1
+                if limit and count >= limit:
+                    break
+
+    def iter_book_ids(self, limit: int | None = None) -> Iterator[str]:
+        for meta in self.iter_book_metadata(limit):
+            yield meta['book_id']
