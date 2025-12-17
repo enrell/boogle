@@ -1,51 +1,52 @@
 import argparse
 import os
+import shutil
 from pathlib import Path
 
 from rust_bm25 import index_corpus_file, FileSearcher
 
 from src.downloader.downloader import BookSeeder
 from src.indexer.stopwords import load_stopwords
+from src.db.database import PostgresRepository
 
 
-def seed_corpus(output_dir: str, limit: int | None = None, batch_size: int = 500, workers: int = 50, refresh: bool = False, use_sqlite: bool = False):
-    seeder = BookSeeder(output_dir=output_dir, max_workers=workers, use_sqlite=use_sqlite)
-    if refresh:
-        updated = seeder.update_metadata(batch_size=batch_size)
-        print(f"Refreshed {updated} books")
-    total = seeder.seed_all(limit=limit, batch_size=batch_size)
-    print(f"Seeded {total} books")
-    return total
-
-
-def update_metadata(output_dir: str, batch_size: int = 100, workers: int = 16, use_sqlite: bool = False):
-    seeder = BookSeeder(output_dir=output_dir, max_workers=workers, use_sqlite=use_sqlite)
-    total = seeder.update_metadata(batch_size=batch_size)
-    print(f"Updated {total} books")
-    return total
-
-
-def index_corpus(
-    books_dir: str,
+def run_index_pipeline(
+    limit: int | None = None,
+    batch_size: int = 1000,
+    use_sqlite: bool = False,
+    reindex: bool = False,
     chunk_size: int = 1000,
     chunk_overlap: int = 100,
-    full: bool = False,
-    batch_size: int = 1000,
+    workers: int = 16,
 ):
+    """
+    Runs the complete indexing pipeline:
+    1. Download/Seed books (incremental/persistent).
+    2. Update Metadata in DB (Postgres or SQLite).
+    3. Build BM25 Index (full re-index of available files).
+    """
+    books_dir = "data/books"
     index_dir = os.getenv("INDEX_DIR", "data/index")
     chunks_dir = os.getenv("CHUNKS_DIR", "data/chunks")
-    stopwords = list(load_stopwords())
     
+    print(f"--- Step 1: Seeding Corpus (SQLite={use_sqlite}) ---")
+    seeder = BookSeeder(output_dir=books_dir, max_workers=workers, use_sqlite=use_sqlite)
+    seeded_total = seeder.seed_all(limit=limit, batch_size=batch_size)
+    print(f"Seeding complete. Total new/verified books in this run: {seeded_total}")
+
+    print(f"\n--- Step 2: Building Index (Reindex={reindex}) ---")
     Path(index_dir).mkdir(parents=True, exist_ok=True)
     Path(chunks_dir).mkdir(parents=True, exist_ok=True)
-    
-    if full:
-        import shutil
+
+    if reindex:
+        print(f"Clearing existing index at {index_dir}...")
         if Path(index_dir).exists():
             shutil.rmtree(index_dir)
         Path(index_dir).mkdir(parents=True, exist_ok=True)
+
+    stopwords = list(load_stopwords())
     
-    print(f"Indexing to filesystem: {index_dir}")
+    print(f"Indexing files from {books_dir} to {index_dir}...")
     indexed, total_chunks = index_corpus_file(
         books_dir,
         index_dir,
@@ -56,12 +57,11 @@ def index_corpus(
         batch_size,
     )
     
-    return indexed, total_chunks
+    print(f"Indexing complete. Processed {indexed} books into {total_chunks} chunks.")
+    return indexed
 
 
 def search(query: str, top_k: int = 10, use_sqlite: bool = False):
-    from src.db.database import PostgresRepository
-    
     index_dir = os.getenv("INDEX_DIR", "data/index")
     stopwords = list(load_stopwords())
     
@@ -102,48 +102,40 @@ def run_api(host: str = "0.0.0.0", port: int = 8000, use_sqlite: bool = False):
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Boogle Search Pipeline CLI")
     subparsers = parser.add_subparsers(dest='command', required=True)
     
-    seed_parser = subparsers.add_parser('seed')
-    seed_parser.add_argument('--output', default='data/books')
-    seed_parser.add_argument('--limit', type=int, default=None)
-    seed_parser.add_argument('--batch-size', type=int, default=1000)
-    seed_parser.add_argument('--workers', type=int, default=16)
-    seed_parser.add_argument('--refresh', action='store_true')
-    seed_parser.add_argument('--sqlite', action='store_true', help='Use SQLite instead of PostgreSQL')
+    idx_parser = subparsers.add_parser('index', help='Seed corpus and build index')
+    idx_parser.add_argument('--limit', type=int, default=None, help='Limit number of books to seed')
+    idx_parser.add_argument('--batch-size', type=int, default=1000, help='Batch size for processing')
+    idx_parser.add_argument('--sqlite', action='store_true', help='Use SQLite instead of PostgreSQL')
+    idx_parser.add_argument('--reindex', action='store_true', help='Force full re-index (clear existing index)')
+    idx_parser.add_argument('--workers', type=int, default=16, help='Number of worker threads for seeding')
+    idx_parser.add_argument('--chunk-size', type=int, default=1000, help='Text chunk size')
+    idx_parser.add_argument('--chunk-overlap', type=int, default=100, help='Text chunk overlap')
     
-    update_parser = subparsers.add_parser('update-metadata')
-    update_parser.add_argument('--output', default='data/books')
-    update_parser.add_argument('--batch-size', type=int, default=1000)
-    update_parser.add_argument('--workers', type=int, default=16)
-    update_parser.add_argument('--sqlite', action='store_true', help='Use SQLite instead of PostgreSQL')
-    
-    idx_parser = subparsers.add_parser('index')
-    idx_parser.add_argument('--books-dir', default='data/books')
-    idx_parser.add_argument('--chunk-size', type=int, default=1000)
-    idx_parser.add_argument('--chunk-overlap', type=int, default=100)
-    idx_parser.add_argument('--batch-size', type=int, default=1000)
-    idx_parser.add_argument('--full', action='store_true', help='Full reindex (clear existing)')
-    
-    search_parser = subparsers.add_parser('search')
-    search_parser.add_argument('query')
-    search_parser.add_argument('--top-k', type=int, default=10)
+    search_parser = subparsers.add_parser('search', help='Search the index')
+    search_parser.add_argument('query', help='Search query')
+    search_parser.add_argument('--top-k', type=int, default=10, help='Number of results')
     search_parser.add_argument('--sqlite', action='store_true', help='Use SQLite instead of PostgreSQL')
     
-    api_parser = subparsers.add_parser('api')
+    api_parser = subparsers.add_parser('api', help='Run the REST API')
     api_parser.add_argument('--host', default="0.0.0.0")
     api_parser.add_argument('--port', type=int, default=8000)
     api_parser.add_argument('--sqlite', action='store_true', help='Use SQLite instead of PostgreSQL')
     
     args = parser.parse_args()
     
-    if args.command == 'seed':
-        seed_corpus(args.output, args.limit, args.batch_size, args.workers, args.refresh, args.sqlite)
-    elif args.command == 'update-metadata':
-        update_metadata(args.output, args.batch_size, args.workers, args.sqlite)
-    elif args.command == 'index':
-        index_corpus(args.books_dir, args.chunk_size, args.chunk_overlap, args.full, args.batch_size)
+    if args.command == 'index':
+        run_index_pipeline(
+            limit=args.limit,
+            batch_size=args.batch_size,
+            use_sqlite=args.sqlite,
+            reindex=args.reindex,
+            chunk_size=args.chunk_size,
+            chunk_overlap=args.chunk_overlap,
+            workers=args.workers
+        )
     elif args.command == 'search':
         search(args.query, args.top_k, args.sqlite)
     elif args.command == 'api':

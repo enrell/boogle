@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use scraper::{Html, Selector};
 use std::fs::File;
-use std::io::{BufReader, Read};
+use std::io::{BufReader, Cursor, Read, Seek};
 use zip::ZipArchive;
 
 use once_cell::sync::Lazy;
@@ -84,11 +84,8 @@ fn should_skip_epub_file(name: &str) -> bool {
     skip_patterns.iter().any(|p| lower.contains(p))
 }
 
-fn parse_epub_internal(path: &str) -> Option<String> {
-    let file = File::open(path).ok()?;
-    let reader = BufReader::new(file);
+fn parse_epub_from_reader<R: Read + Seek>(reader: R) -> Option<String> {
     let mut archive = ZipArchive::new(reader).ok()?;
-
     let mut texts = Vec::new();
 
     for i in 0..archive.len() {
@@ -108,6 +105,30 @@ fn parse_epub_internal(path: &str) -> Option<String> {
     }
 
     Some(texts.join(" "))
+}
+
+fn parse_epub_internal(path: &str) -> Option<String> {
+    let file = File::open(path).ok()?;
+    let reader = BufReader::new(file);
+    parse_epub_from_reader(reader)
+}
+
+pub fn parse_bytes(bytes: &[u8], extension: &str) -> Option<String> {
+    if extension == "epub" {
+        let cursor = Cursor::new(bytes);
+        parse_epub_from_reader(cursor)
+    } else if extension == "pdf" {
+        let text = pdf_extract::extract_text_from_mem(bytes).ok()?;
+        Some(normalize_whitespace(&text))
+    } else if extension == "txt" {
+        if simdutf8::basic::from_utf8(bytes).is_err() {
+            return None;
+        }
+        let text = unsafe { String::from_utf8_unchecked(bytes.to_vec()) };
+        Some(normalize_whitespace(&text))
+    } else {
+        None
+    }
 }
 
 #[pyfunction]

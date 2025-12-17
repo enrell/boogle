@@ -13,7 +13,7 @@ use crate::codecs::encode_postings_separated;
 use crate::document::parsers::{chunk_text, parse_file};
 use crate::index::segment::{BatchData, IndexMeta, ProcessedDoc, SegmentMeta};
 
-fn write_segment(data: BatchData) -> std::io::Result<SegmentMeta> {
+pub(crate) fn write_segment(data: BatchData) -> std::io::Result<SegmentMeta> {
     fs::create_dir_all(&data.segment_dir)?;
 
     let total_chunks: usize = data.docs.iter().map(|d| d.chunks.len()).sum();

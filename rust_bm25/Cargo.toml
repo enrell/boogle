@@ -35,6 +35,8 @@ simdutf8 = "0.1"
 bumpalo = "3.19.1"
 
 bitpacking = "0.9"
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+num_cpus = "1.17"
 
 [profile.release]
 panic = "abort"
