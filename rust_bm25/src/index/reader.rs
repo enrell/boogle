@@ -1,4 +1,3 @@
-use crate::codecs::decode_postings_separated;
 use crate::index::segment::SegmentMeta;
 use fst::automaton::Levenshtein;
 use fst::{IntoStreamer, Map as FstMap, Streamer};
@@ -67,31 +66,6 @@ impl SegmentReader {
         })
     }
 
-    pub fn get_postings(&self, term: &str) -> Option<Vec<(u32, u32)>> {
-        let term_idx = self.terms_fst.get(term)?;
-        // 28 bytes per term: offset_doc(8) + len_doc(4) + offset_freq(8) + len_freq(4) + doc_count(4)
-        let offset_pos = (term_idx as usize) * 28;
-
-        let doc_offset = self.read_u64(&self.offsets_mmap, offset_pos)?;
-        let doc_len = self.read_u32(&self.offsets_mmap, offset_pos + 8)?;
-        let freq_offset = self.read_u64(&self.offsets_mmap, offset_pos + 12)?;
-        let freq_len = self.read_u32(&self.offsets_mmap, offset_pos + 20)?;
-        let doc_count = self.read_u32(&self.offsets_mmap, offset_pos + 24)?;
-
-        let doc_end = (doc_offset + doc_len as u64) as usize;
-        let freq_end = (freq_offset + freq_len as u64) as usize;
-
-        if doc_end > self.postings_docs_mmap.len() || freq_end > self.postings_freqs_mmap.len() {
-            return None;
-        }
-
-        Some(decode_postings_separated(
-            &self.postings_docs_mmap[doc_offset as usize..doc_end],
-            &self.postings_freqs_mmap[freq_offset as usize..freq_end],
-            doc_count as usize,
-        ))
-    }
-
     pub fn get_doc_freq(&self, term: &str) -> Option<u32> {
         let term_idx = self.terms_fst.get(term)?;
         // 28 bytes per term
@@ -101,7 +75,7 @@ impl SegmentReader {
         self.read_u32(&self.offsets_mmap, offset_pos + 24)
     }
 
-    pub fn get_postings_iter(&self, term: &str) -> Option<PostingsIter> {
+    pub fn get_postings_iter(&self, term: &str) -> Option<PostingsIter<'_>> {
         let term_idx = self.terms_fst.get(term)?;
         let offset_pos = (term_idx as usize) * 28;
 

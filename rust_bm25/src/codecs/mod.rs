@@ -58,6 +58,7 @@ pub fn encode_postings_separated(postings: &[(u32, u32)]) -> (Vec<u8>, Vec<u8>) 
     (docs_buf, freqs_buf)
 }
 
+#[allow(dead_code)]
 pub fn decode_postings_separated(
     doc_data: &[u8],
     tf_data: &[u8],

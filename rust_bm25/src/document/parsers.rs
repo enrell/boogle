@@ -53,6 +53,7 @@ fn extract_text_from_html(html: &str) -> String {
     normalize_whitespace(&text)
 }
 
+#[allow(dead_code)]
 pub fn extract_json_field(json: &str, field: &str) -> Option<String> {
     // Try with space (Python default) and without
     let patterns = [format!("\"{}\": \"", field), format!("\"{}\":\"", field)];
