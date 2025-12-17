@@ -1,9 +1,10 @@
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
+use rkyv::{Archive, Deserialize, Serialize as RkyvSerialize};
 use rustc_hash::{FxHashMap, FxHashSet};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize as SerdeDeserialize, Serialize as SerdeSerialize};
 use std::fs::File;
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering as AtomicOrdering};
 use std::sync::Mutex;
@@ -112,12 +113,13 @@ pub fn process_books_to_index(
     (docs_result, terms_result, total)
 }
 
-#[derive(Serialize, Deserialize, Default, bincode::Encode, bincode::Decode)]
+#[derive(Archive, RkyvSerialize, Deserialize, SerdeSerialize, SerdeDeserialize, Default)]
+#[rkyv(derive(Debug))]
 struct IndexData {
     k1: f32,
     b: f32,
-    terms: FxHashMap<String, Vec<u8>>,
-    term_df: FxHashMap<String, u32>,
+    terms: std::collections::HashMap<String, Vec<u8>>,
+    term_df: std::collections::HashMap<String, u32>,
     doc_lengths: Vec<u32>,
     doc_metadata: Vec<String>,
     num_docs: u32,
@@ -199,7 +201,10 @@ impl BM25Index {
         let file = File::create(path)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
         let mut writer = BufWriter::new(file);
-        bincode::encode_into_std_write(&self.data, &mut writer, bincode::config::standard())
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&self.data)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
+        writer
+            .write_all(&bytes)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
         Ok(())
     }
@@ -209,9 +214,14 @@ impl BM25Index {
         let file = File::open(path)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
         let mut reader = BufReader::new(file);
-        let data: IndexData =
-            bincode::decode_from_std_read(&mut reader, bincode::config::standard())
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
+        let mut bytes = Vec::new();
+        reader
+            .read_to_end(&mut bytes)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
+        let archived = rkyv::access::<ArchivedIndexData, rkyv::rancor::Error>(&bytes)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
+        let data: IndexData = rkyv::deserialize::<IndexData, rkyv::rancor::Error>(archived)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
         Ok(Self {
             data,
             pending: FxHashMap::default(),

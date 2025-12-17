@@ -11,7 +11,7 @@ crate-type = ["cdylib"]
 pyo3 = { version = "0.27.2", features = ["extension-module"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-bincode = "2.0"
+rkyv = "0.8.12"
 rayon = "1.11.0"
 rustc-hash = "2.1.1"
 zip = "6.0.0"
@@ -25,8 +25,24 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 tokio-postgres = "0.7"
 glob = "0.3.3"
 futures = "0.3"
-bb8 = "0.8"
-bb8-postgres = "0.8"
-rusqlite = { version = "0.32", features = ["bundled"] }
+bb8 = "0.9.0"
+bb8-postgres = "0.9.0"
+rusqlite = { version = "0.37", features = ["bundled"] }
 r2d2 = "0.8"
-r2d2_sqlite = "0.25"
+r2d2_sqlite = "0.31.0"
+memmap2 = "0.9"
+fst = "0.4"
+crossbeam-channel = "0.5"
+dashmap = "6"
+flume = "0.12.0"
+deunicode = "1.6"
+blake3 = "1.8"
+simdutf8 = "0.1"
+bumpalo = "3.19.1"
+
+bitpacking = "0.9"
+
+[profile.release]
+panic = "abort"
+strip = "symbols"
+opt-level = 3

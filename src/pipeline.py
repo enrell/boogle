@@ -2,7 +2,7 @@ import argparse
 import os
 from pathlib import Path
 
-from rust_bm25 import index_corpus as rust_index_corpus, index_corpus_sqlite
+from rust_bm25 import index_corpus_file, FileSearcher
 
 from src.downloader.downloader import BookSeeder
 from src.indexer.stopwords import load_stopwords
@@ -25,123 +25,68 @@ def update_metadata(output_dir: str, batch_size: int = 100, workers: int = 16, u
     return total
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    subparsers = parser.add_subparsers(dest='command', required=True)
-    
-    seed_parser = subparsers.add_parser('seed')
-    seed_parser.add_argument('--output', default='data/books')
-    seed_parser.add_argument('--limit', type=int, default=None)
-    seed_parser.add_argument('--batch-size', type=int, default=200)
-    seed_parser.add_argument('--workers', type=int, default=16)
-    seed_parser.add_argument('--refresh', action='store_true')
-    seed_parser.add_argument('--sqlite', action='store_true', help='Use SQLite instead of PostgreSQL')
-    
-    update_parser = subparsers.add_parser('update-metadata')
-    update_parser.add_argument('--output', default='data/books')
-    update_parser.add_argument('--batch-size', type=int, default=100)
-    update_parser.add_argument('--workers', type=int, default=16)
-    update_parser.add_argument('--sqlite', action='store_true', help='Use SQLite instead of PostgreSQL')
-    
-    idx_parser = subparsers.add_parser('index')
-    idx_parser.add_argument('--books-dir', default='data/books')
-    idx_parser.add_argument('--chunk-size', type=int, default=1000)
-    idx_parser.add_argument('--chunk-overlap', type=int, default=100)
-    idx_parser.add_argument('--batch-size', type=int, default=100)
-    idx_parser.add_argument('--full', action='store_true', help='Full reindex (clear existing)')
-    idx_parser.add_argument('--sqlite', action='store_true', help='Use SQLite instead of PostgreSQL')
-    
-    search_parser = subparsers.add_parser('search')
-    search_parser.add_argument('query')
-    search_parser.add_argument('--top-k', type=int, default=10)
-    search_parser.add_argument('--sqlite', action='store_true', help='Use SQLite instead of PostgreSQL')
-    
-    api_parser = subparsers.add_parser('api')
-    api_parser.add_argument('--host', default="0.0.0.0")
-    api_parser.add_argument('--port', type=int, default=8000)
-    api_parser.add_argument('--sqlite', action='store_true', help='Use SQLite instead of PostgreSQL')
-    
-    args = parser.parse_args()
-    
-    if args.command == 'seed':
-        seed_corpus(args.output, args.limit, args.batch_size, args.workers, args.refresh, args.sqlite)
-    elif args.command == 'update-metadata':
-        update_metadata(args.output, args.batch_size, args.workers, args.sqlite)
-    elif args.command == 'index':
-        index_corpus(args.books_dir, args.chunk_size, args.chunk_overlap, args.full, args.batch_size, args.sqlite)
-    elif args.command == 'search':
-        search(args.query, args.top_k, args.sqlite)
-    elif args.command == 'api':
-        run_api(args.host, args.port, args.sqlite)
-
-
-def get_db_url() -> str:
-    """Build database URL from environment variables."""
-    url = os.getenv("DATABASE_URL")
-    if url:
-        return url
-    user = os.getenv("POSTGRES_USER", "boogle")
-    password = os.getenv("POSTGRES_PASSWORD", "boogle")
-    host = os.getenv("POSTGRES_HOST", "localhost")
-    port = os.getenv("POSTGRES_PORT", "5432")
-    database = os.getenv("POSTGRES_DB", "boogle")
-    return f"host={host} port={port} user={user} password={password} dbname={database}"
-
-
 def index_corpus(
     books_dir: str,
     chunk_size: int = 1000,
     chunk_overlap: int = 100,
     full: bool = False,
-    batch_size: int = 100,
-    use_sqlite: bool = False,
+    batch_size: int = 1000,
 ):
-    """Index books using the Rust implementation."""
+    index_dir = os.getenv("INDEX_DIR", "data/index")
     chunks_dir = os.getenv("CHUNKS_DIR", "data/chunks")
     stopwords = list(load_stopwords())
     
-    # Ensure chunks directory exists
+    Path(index_dir).mkdir(parents=True, exist_ok=True)
     Path(chunks_dir).mkdir(parents=True, exist_ok=True)
     
-    if use_sqlite:
-        db_path = os.getenv("SQLITE_DB_PATH", "data/boogle.db")
-        print(f"Using SQLite database at {db_path}")
-        indexed, skipped, total_chunks = index_corpus_sqlite(
-            books_dir,
-            chunks_dir,
-            db_path,
-            stopwords,
-            chunk_size,
-            chunk_overlap,
-            full,
-            batch_size,
-        )
-    else:
-        db_url = get_db_url()
-        print(f"Using PostgreSQL database")
-        indexed, skipped, total_chunks = rust_index_corpus(
-            books_dir,
-            chunks_dir,
-            db_url,
-            stopwords,
-            chunk_size,
-            chunk_overlap,
-            full,
-            batch_size,
-        )
+    if full:
+        import shutil
+        if Path(index_dir).exists():
+            shutil.rmtree(index_dir)
+        Path(index_dir).mkdir(parents=True, exist_ok=True)
     
-    return indexed, skipped, total_chunks
+    print(f"Indexing to filesystem: {index_dir}")
+    indexed, total_chunks = index_corpus_file(
+        books_dir,
+        index_dir,
+        chunks_dir,
+        stopwords,
+        chunk_size,
+        chunk_overlap,
+        batch_size,
+    )
+    
+    return indexed, total_chunks
 
 
 def search(query: str, top_k: int = 10, use_sqlite: bool = False):
-    from src.indexer.ranker import Ranker
-    from src.indexer.storage import IndexStorage
+    from src.db.database import PostgresRepository
     
-    with IndexStorage(use_sqlite=use_sqlite) as storage:
-        ranker = Ranker(storage)
-        results = ranker.search(query, top_k)
-        for r in results:
-            print(f"[{r.score:.4f}] {r.title} by {r.author} (book={r.book_id})")
+    index_dir = os.getenv("INDEX_DIR", "data/index")
+    stopwords = list(load_stopwords())
+    
+    searcher = FileSearcher(index_dir)
+    searcher.set_stopwords(stopwords)
+    
+    results = searcher.search(query, top_k * 10)
+    
+    db = PostgresRepository(use_sqlite=use_sqlite)
+    seen_books = set()
+    count = 0
+    
+    for book_id, score, chunk_id in results:
+        if book_id in seen_books:
+            continue
+        seen_books.add(book_id)
+        
+        meta = db.get_book("gutenberg", book_id)
+        if meta:
+            title = meta.get("title", "Unknown")
+            author = meta.get("author", "Unknown")
+            print(f"[{score:.4f}] {title} by {author} (book={book_id})")
+            count += 1
+            if count >= top_k:
+                break
 
 
 def run_api(host: str = "0.0.0.0", port: int = 8000, use_sqlite: bool = False):
@@ -180,7 +125,6 @@ def main():
     idx_parser.add_argument('--chunk-overlap', type=int, default=100)
     idx_parser.add_argument('--batch-size', type=int, default=1000)
     idx_parser.add_argument('--full', action='store_true', help='Full reindex (clear existing)')
-    idx_parser.add_argument('--sqlite', action='store_true', help='Use SQLite instead of PostgreSQL')
     
     search_parser = subparsers.add_parser('search')
     search_parser.add_argument('query')
@@ -199,7 +143,7 @@ def main():
     elif args.command == 'update-metadata':
         update_metadata(args.output, args.batch_size, args.workers, args.sqlite)
     elif args.command == 'index':
-        index_corpus(args.books_dir, args.chunk_size, args.chunk_overlap, args.full, args.batch_size, args.sqlite)
+        index_corpus(args.books_dir, args.chunk_size, args.chunk_overlap, args.full, args.batch_size)
     elif args.command == 'search':
         search(args.query, args.top_k, args.sqlite)
     elif args.command == 'api':
@@ -208,3 +152,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+

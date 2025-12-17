@@ -128,19 +128,22 @@ pub fn parse_pdf(path: &str) -> Option<String> {
 
 #[pyfunction]
 pub fn parse_txt(path: &str) -> Option<String> {
-    let text = std::fs::read_to_string(path).ok()?;
+    let bytes = std::fs::read(path).ok()?;
+    if simdutf8::basic::from_utf8(&bytes).is_err() {
+        return None;
+    }
+    let text = unsafe { String::from_utf8_unchecked(bytes) };
     Some(normalize_whitespace(&text))
 }
 
 #[pyfunction]
 pub fn chunk_text(text: &str, chunk_size: usize, overlap: usize) -> Vec<String> {
-    // chunk_size and overlap are now in CHARACTERS, not bytes
-    let chars: Vec<char> = text.chars().collect();
-    let total_chars = chars.len();
-
-    if total_chars == 0 {
+    if text.is_empty() {
         return vec![];
     }
+
+    let char_indices: Vec<usize> = text.char_indices().map(|(i, _)| i).collect();
+    let total_chars = char_indices.len();
 
     if total_chars <= chunk_size {
         let trimmed = text.trim();
@@ -152,44 +155,59 @@ pub fn chunk_text(text: &str, chunk_size: usize, overlap: usize) -> Vec<String> 
     }
 
     let mut chunks = Vec::new();
-    let mut start = 0;
+    let mut start_char_idx = 0;
 
-    while start < total_chars {
-        let mut end = (start + chunk_size).min(total_chars);
+    while start_char_idx < total_chars {
+        let mut end_char_idx = (start_char_idx + chunk_size).min(total_chars);
 
         // Try to break at word boundary (space) if not at end
-        if end < total_chars {
-            // Look backwards for a space
-            let mut best_break = end;
-            for i in (start..end).rev() {
-                if chars[i] == ' ' {
+        if end_char_idx < total_chars {
+            let mut best_break = end_char_idx;
+            // Look backwards for a space, limit search to last 100 chars or so to avoid scanning too much
+            let search_limit = (end_char_idx.saturating_sub(100)).max(start_char_idx);
+
+            for i in (search_limit..end_char_idx).rev() {
+                let byte_idx = char_indices[i];
+                // Check if the character at this byte index is a space
+                if text[byte_idx..].chars().next() == Some(' ') {
                     best_break = i;
                     break;
                 }
             }
-            // Only use word break if we found one and it's not at the start
-            if best_break > start {
-                end = best_break;
+            if best_break > start_char_idx {
+                end_char_idx = best_break;
             }
         }
 
-        // Collect chars into string
-        let chunk: String = chars[start..end].iter().collect();
+        // Slice string using byte indices
+        let start_byte = char_indices[start_char_idx];
+        let end_byte = if end_char_idx == total_chars {
+            text.len()
+        } else {
+            char_indices[end_char_idx]
+        };
+
+        let chunk = &text[start_byte..end_byte];
         let trimmed = chunk.trim();
         if !trimmed.is_empty() {
             chunks.push(trimmed.to_string());
         }
 
         // Move forward with overlap
-        let advance = if end > overlap { end - overlap } else { end };
-        if advance <= start {
-            // Prevent infinite loop
-            start = end;
+        let advance_char_idx = if end_char_idx > overlap {
+            end_char_idx - overlap
         } else {
-            start = advance;
+            end_char_idx
+        };
+
+        if advance_char_idx <= start_char_idx {
+            // Force progress
+            start_char_idx = end_char_idx;
+        } else {
+            start_char_idx = advance_char_idx;
         }
 
-        if end >= total_chars {
+        if end_char_idx >= total_chars {
             break;
         }
     }
@@ -205,7 +223,11 @@ pub fn parse_file(path: &str) -> Option<String> {
         let text = pdf_extract::extract_text_from_mem(&bytes).ok()?;
         Some(normalize_whitespace(&text))
     } else if path.ends_with(".txt") {
-        let text = std::fs::read_to_string(path).ok()?;
+        let bytes = std::fs::read(path).ok()?;
+        if simdutf8::basic::from_utf8(&bytes).is_err() {
+            return None;
+        }
+        let text = unsafe { String::from_utf8_unchecked(bytes) };
         Some(normalize_whitespace(&text))
     } else {
         None
