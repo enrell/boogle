@@ -179,6 +179,56 @@ uv run scripts/benchmark.py all --sqlite
 
 ---
 
+## ⚡ Realtime Indexing
+
+Boogle supports **realtime indexing** for adding documents on the fly without rebuilding the entire index.
+
+### Architecture
+The realtime indexer uses a hybrid LSM-tree design:
+- **Disk segments**: Immutable BM25 index files (from batch indexing)
+- **RAM buffer**: In-memory index for newly added documents
+- **WAL (Write-Ahead Log)**: Durability for in-flight documents
+
+Search queries are federated across both disk and memory, with results merged and ranked.
+
+### Enable Realtime Mode
+Set the `REALTIME_INDEX` environment variable:
+```bash
+REALTIME_INDEX=1 uv run boogle api --sqlite
+```
+
+### API Endpoints
+
+**Add a document:**
+```bash
+curl -X POST http://localhost:8000/documents \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "Full text content of the book...",
+    "book_id": "custom-123",
+    "title": "My Custom Book",
+    "author": "John Doe"
+  }'
+```
+
+**Flush memory buffer:**
+```bash
+curl -X POST http://localhost:8000/documents/flush
+```
+
+**Check mode:**
+```bash
+curl http://localhost:8000/health
+# Returns: {"status": "healthy", "mode": "realtime"}
+```
+
+### Notes
+- Documents added via `/documents` are immediately searchable
+- The WAL ensures documents survive server restarts
+- Call `/documents/flush` after persisting documents to disk via batch indexing
+
+---
+
 ## 🪪 License
 
 This project is open-source under the **MIT License**.

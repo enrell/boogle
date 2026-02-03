@@ -70,7 +70,9 @@ def test_health_check(api_client):
     client, _, _ = api_client
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "healthy"}
+    data = response.json()
+    assert data["status"] == "healthy"
+    assert data["mode"] in ("batch", "realtime")
 
 
 def test_get_metadata_found(api_client):
@@ -154,3 +156,28 @@ def test_search_deduplicates_chunks(api_client):
     
     assert len(results) == 1
     assert results[0]["score"] == 0.9
+
+
+def test_realtime_add_document_disabled(api_client):
+    """Test that add_document returns 400 when realtime mode is disabled."""
+    client, _, _ = api_client
+    
+    response = client.post("/documents", json={
+        "content": "Test document content",
+        "book_id": "test1",
+        "title": "Test Book",
+        "author": "Test Author"
+    })
+    
+    assert response.status_code == 400
+    assert "Realtime indexing not enabled" in response.json()["detail"]
+
+
+def test_realtime_flush_disabled(api_client):
+    """Test that flush returns 400 when realtime mode is disabled."""
+    client, _, _ = api_client
+    
+    response = client.post("/documents/flush")
+    
+    assert response.status_code == 400
+    assert "Realtime indexing not enabled" in response.json()["detail"]

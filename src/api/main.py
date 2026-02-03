@@ -6,24 +6,31 @@ from typing import List, Optional
 from contextlib import asynccontextmanager
 from collections import defaultdict
 
-from rust_bm25 import FileSearcher
+from rust_bm25 import FileSearcher, RealTimeIndexer
 from src.db.database import PostgresRepository
 from src.indexer.stopwords import load_stopwords
 
 
 searcher: FileSearcher | None = None
+realtime_indexer: RealTimeIndexer | None = None
 database: PostgresRepository | None = None
+use_realtime: bool = False
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global searcher, database
+    global searcher, realtime_indexer, database, use_realtime
     index_dir = os.getenv("INDEX_DIR", "data/index")
     use_sqlite = os.getenv("USE_SQLITE", "0") == "1"
+    use_realtime = os.getenv("REALTIME_INDEX", "0") == "1"
     stopwords = list(load_stopwords())
     
-    searcher = FileSearcher(index_dir)
-    searcher.set_stopwords(stopwords)
+    if use_realtime:
+        realtime_indexer = RealTimeIndexer(index_dir)
+    else:
+        searcher = FileSearcher(index_dir)
+        searcher.set_stopwords(stopwords)
+    
     database = PostgresRepository(use_sqlite=use_sqlite)
     yield
 
@@ -65,6 +72,23 @@ class SearchResult(BaseModel):
     url: str
 
 
+class AddDocumentRequest(BaseModel):
+    content: str
+    book_id: str
+    title: str = "Unknown"
+    author: str = "Unknown"
+
+
+class AddDocumentResponse(BaseModel):
+    doc_id: int
+    message: str
+
+
+class FlushResponse(BaseModel):
+    flushed_count: int
+    message: str
+
+
 @app.get("/")
 async def root():
     return {"message": "Boogle Search API"}
@@ -82,10 +106,17 @@ async def get_metadata(source: str, book_id: str):
 
 @app.get("/search", response_model=List[SearchResult])
 async def search_books(query: str, limit: int = 10):
-    if searcher is None or database is None:
-        raise HTTPException(status_code=500, detail="Search not initialized")
+    if database is None:
+        raise HTTPException(status_code=500, detail="Database not initialized")
     
-    raw_results = searcher.search(query, limit * 20)
+    if use_realtime:
+        if realtime_indexer is None:
+            raise HTTPException(status_code=500, detail="Realtime indexer not initialized")
+        raw_results = realtime_indexer.search(query, limit * 20)
+    else:
+        if searcher is None:
+            raise HTTPException(status_code=500, detail="Search not initialized")
+        raw_results = searcher.search(query, limit * 20)
     
     candidate_ids = {r[0] for r in raw_results}
     candidates_meta = {}
@@ -163,5 +194,50 @@ async def search_books(query: str, limit: int = 10):
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy"}
+    return {"status": "healthy", "mode": "realtime" if use_realtime else "batch"}
+
+
+@app.post("/documents", response_model=AddDocumentResponse)
+async def add_document(request: AddDocumentRequest):
+    """Add a document to the realtime index (only available in realtime mode)."""
+    if not use_realtime:
+        raise HTTPException(
+            status_code=400, 
+            detail="Realtime indexing not enabled. Set REALTIME_INDEX=1 to enable."
+        )
+    if realtime_indexer is None:
+        raise HTTPException(status_code=500, detail="Realtime indexer not initialized")
+    
+    import json
+    metadata = json.dumps({
+        "book_id": request.book_id,
+        "title": request.title,
+        "author": request.author
+    })
+    
+    doc_id = realtime_indexer.add_document(request.content, metadata)
+    
+    return AddDocumentResponse(
+        doc_id=doc_id,
+        message=f"Document added with ID {doc_id}"
+    )
+
+
+@app.post("/documents/flush", response_model=FlushResponse)
+async def flush_documents():
+    """Flush in-memory documents (clears WAL, docs should be persisted to disk separately)."""
+    if not use_realtime:
+        raise HTTPException(
+            status_code=400,
+            detail="Realtime indexing not enabled. Set REALTIME_INDEX=1 to enable."
+        )
+    if realtime_indexer is None:
+        raise HTTPException(status_code=500, detail="Realtime indexer not initialized")
+    
+    count = realtime_indexer.flush()
+    
+    return FlushResponse(
+        flushed_count=count,
+        message=f"Flushed {count} documents from memory"
+    )
 
