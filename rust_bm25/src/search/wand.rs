@@ -1,9 +1,8 @@
+use crate::codecs::decode_postings_internal;
 use pyo3::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-
-use crate::codecs::decode_postings_internal;
 
 struct TermInfo {
     idf: f32,
@@ -46,6 +45,7 @@ pub struct WandSearcher {
     b: f32,
     num_docs: u32,
     avgdl: f32,
+    #[allow(dead_code)]
     stopwords: FxHashSet<String>,
 }
 
@@ -77,69 +77,39 @@ impl WandSearcher {
             return vec![];
         }
 
-        let mut terms: Vec<TermInfo> = posting_data
-            .into_iter()
-            .map(|(df, data)| {
-                let idf = self.compute_idf(df);
-                let upper_bound = idf * (self.k1 + 1.0);
-                let postings: FxHashMap<u32, u32> =
-                    decode_postings_internal(&data).into_iter().collect();
-                TermInfo {
-                    idf,
-                    upper_bound,
-                    postings,
-                }
-            })
-            .collect();
-
+        let mut terms = self.build_term_info(posting_data);
         terms.sort_by_key(|t| t.postings.len());
 
-        let candidate_docs = self.compute_candidates(&terms, top_k);
-
-        // Compute doc lengths from tf sums
-        let mut doc_lengths: FxHashMap<u32, u32> = FxHashMap::default();
-        for term in &terms {
-            for (&doc_id, &tf) in &term.postings {
-                if candidate_docs.contains(&doc_id) {
-                    *doc_lengths.entry(doc_id).or_insert(0) += tf;
-                }
-            }
-        }
-
-        // Use avgdl as minimum
-        let min_len = (self.avgdl * 0.5) as u32;
-        for len in doc_lengths.values_mut() {
-            if *len < min_len {
-                *len = self.avgdl as u32;
-            }
-        }
-
-        let candidates_with_upper: Vec<(f32, u32)> = candidate_docs
-            .iter()
-            .filter_map(|&doc_id| {
-                doc_lengths.get(&doc_id).map(|_| {
-                    let upper: f32 = terms
-                        .iter()
-                        .filter(|t| t.postings.contains_key(&doc_id))
-                        .map(|t| t.upper_bound)
-                        .sum();
-                    (upper, doc_id)
-                })
-            })
-            .collect();
+        let candidates = self.compute_candidates(&terms, top_k);
+        let doc_lengths = self.compute_doc_lengths(&terms, &candidates);
+        let candidates_with_upper = self.compute_upper_bounds(&terms, &candidates, &doc_lengths);
 
         self.wand_score(terms, candidates_with_upper, &doc_lengths, top_k)
     }
 }
 
 impl WandSearcher {
+    fn build_term_info(&self, posting_data: Vec<(u32, Vec<u8>)>) -> Vec<TermInfo> {
+        posting_data
+            .into_iter()
+            .map(|(df, data)| {
+                let idf = self.compute_idf(df);
+                TermInfo {
+                    idf,
+                    upper_bound: idf * (self.k1 + 1.0),
+                    postings: decode_postings_internal(&data).into_iter().collect(),
+                }
+            })
+            .collect()
+    }
+
     fn compute_idf(&self, df: u32) -> f32 {
         let n = self.num_docs as f32;
         let df = df as f32;
         ((n - df + 0.5) / (df + 0.5) + 1.0).ln()
     }
 
-    fn bm25_term_score(&self, tf: u32, idf: f32, doc_len: u32) -> f32 {
+    fn bm25_score(&self, tf: u32, doc_len: u32, idf: f32) -> f32 {
         let tf = tf as f32;
         let doc_len = doc_len as f32;
         let numerator = tf * (self.k1 + 1.0);
@@ -152,32 +122,72 @@ impl WandSearcher {
             return FxHashSet::default();
         }
 
-        // Start with rarest term
         let mut candidates: FxHashSet<u32> = terms[0].postings.keys().copied().collect();
 
-        // Early exit for single term or small candidate set
         if terms.len() == 1 || candidates.len() <= top_k * 5 {
             return candidates;
         }
 
-        // Progressive intersection with early termination
         for term in terms.iter().skip(1) {
             let term_docs: FxHashSet<u32> = term.postings.keys().copied().collect();
             let intersection: FxHashSet<u32> =
                 candidates.intersection(&term_docs).copied().collect();
 
-            // Keep intersection if it has enough candidates
             if intersection.len() >= top_k * 2 {
                 candidates = intersection;
             }
 
-            // Stop early if we have a good candidate set
             if candidates.len() <= top_k * 5 {
                 break;
             }
         }
 
         candidates
+    }
+
+    fn compute_doc_lengths(
+        &self,
+        terms: &[TermInfo],
+        candidates: &FxHashSet<u32>,
+    ) -> FxHashMap<u32, u32> {
+        let min_len = (self.avgdl * 0.5) as u32;
+        let mut lengths: FxHashMap<u32, u32> = FxHashMap::default();
+
+        for term in terms {
+            for (&doc_id, &tf) in &term.postings {
+                if candidates.contains(&doc_id) {
+                    *lengths.entry(doc_id).or_insert(0) += tf;
+                }
+            }
+        }
+
+        for len in lengths.values_mut() {
+            if *len < min_len {
+                *len = self.avgdl as u32;
+            }
+        }
+
+        lengths
+    }
+
+    fn compute_upper_bounds(
+        &self,
+        terms: &[TermInfo],
+        candidates: &FxHashSet<u32>,
+        doc_lengths: &FxHashMap<u32, u32>,
+    ) -> Vec<(f32, u32)> {
+        candidates
+            .iter()
+            .filter_map(|&doc_id| {
+                doc_lengths.get(&doc_id)?;
+                let upper: f32 = terms
+                    .iter()
+                    .filter(|t| t.postings.contains_key(&doc_id))
+                    .map(|t| t.upper_bound)
+                    .sum();
+                Some((upper, doc_id))
+            })
+            .collect()
     }
 
     fn wand_score(
@@ -197,17 +207,16 @@ impl WandSearcher {
                 break;
             }
 
-            let doc_len = match doc_lengths.get(&doc_id) {
-                Some(&len) => len,
-                None => continue,
+            let Some(&doc_len) = doc_lengths.get(&doc_id) else {
+                continue;
             };
 
             let score: f32 = terms
                 .iter()
-                .filter_map(|term| {
-                    term.postings
+                .filter_map(|t| {
+                    t.postings
                         .get(&doc_id)
-                        .map(|&tf| self.bm25_term_score(tf, term.idf, doc_len))
+                        .map(|&tf| self.bm25_score(tf, doc_len, t.idf))
                 })
                 .sum();
 
