@@ -2,13 +2,41 @@
   {
     "test_type": "indexing",
     "metrics": {
-      "duration_seconds": 1.433,
-      "books_indexed": 50,
-      "chunks_generated": 30451,
-      "books_per_second": 34.9,
-      "chunks_per_second": 21253.4,
-      "index_size_mb": 5.71
+      "duration_seconds": 19.71,
+      "books_indexed": 994,
+      "chunks_generated": 549487,
+      "books_per_second": 50.4,
+      "chunks_per_second": 27878.1,
+      "index_size_mb": 75.22
     },
-    "timestamp": 1770093090.070229
+    "timestamp": 1770093399.737022
+  },
+  {
+    "test_type": "library_search",
+    "metrics": {
+      "p50_ms": 2.68,
+      "p90_ms": 3.58,
+      "p99_ms": 24.98,
+      "mean_ms": 3.16,
+      "min_ms": 1.95,
+      "max_ms": 25.13,
+      "qps": 316.2
+    },
+    "timestamp": 1770093400.2359369
+  },
+  {
+    "test_type": "api_search",
+    "metrics": {
+      "p50_ms": 45.97,
+      "p90_ms": 49.86,
+      "p99_ms": 62.01,
+      "mean_ms": 45.9,
+      "min_ms": 17.28,
+      "max_ms": 62.02,
+      "qps": 21.8,
+      "errors": 0,
+      "total_requests": 100
+    },
+    "timestamp": 1770093401.3197734
   }
 ]

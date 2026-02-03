@@ -45,12 +45,25 @@ def api_client(monkeypatch):
     repo = FakeRepository()
     searcher = FakeSearcher("dummy_dir")
     
-    # Patch the global variables in api.main
+    # Patch the global variables in api.main to point to our mocks
     monkeypatch.setattr(api_main, "database", repo)
     monkeypatch.setattr(api_main, "searcher", searcher)
     
+    # Override lifespan to prevent real DB connection/Index loading
+    from contextlib import asynccontextmanager
+    @asynccontextmanager
+    async def mock_lifespan(app):
+        # We manually set the globals above, so we don't need lifespan to do anything
+        yield
+        
+    original_lifespan = api_main.app.router.lifespan_context
+    api_main.app.router.lifespan_context = mock_lifespan
+    
     with TestClient(api_main.app) as client:
         yield client, repo, searcher
+        
+    # Restore (though usually not strictly necessary if process dies, but good practice)
+    api_main.app.router.lifespan_context = original_lifespan
 
 
 def test_health_check(api_client):
