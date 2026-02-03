@@ -26,45 +26,29 @@ impl Wal {
     pub fn append(&mut self, doc: &Document) -> std::io::Result<()> {
         let serialized = serde_json::to_string(doc)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-        // We write newline-delimited JSON
         writeln!(self.writer, "{}", serialized)?;
-        self.writer.flush()?; // Ensure it hits the OS buffer (users req: "mentir para o disco", but WAL implies safety?)
-                              // The user said: "Ele não grava o arquivo no disco rígido imediatamente... ao mesmo tempo que escreve no buffer, ele anexa a operação no Translog"
-                              // And "Escrever sequencialmente no final de um arquivo é muito rápido."
-                              // So flushing to OS cache is fine, strict fsync isn't strictly required for "NRT speed" logic unless we want crash safety against power loss immediately.
-                              // User said: "Para não perder dados se a luz acabar... anexa a operação no Translog... Escrever sequencialmente... é muito rápido."
-                              // Usually `write` to File goes to OS cache. `flush` ensures it leaves the Rust buffer. `fsync` hits disk.
-                              // We will `flush` to ensure it's in OS cache/WAL file handle.
-        Ok(())
+        self.writer.flush()
     }
 
     pub fn read_all(&self) -> std::io::Result<Vec<Document>> {
         let file = File::open(&self.path)?;
         let reader = BufReader::new(file);
-        let mut docs = Vec::new();
 
-        for line in reader.lines() {
-            let line = line?;
-            if line.trim().is_empty() {
-                continue;
-            }
-            if let Ok(doc) = serde_json::from_str::<Document>(&line) {
-                docs.push(doc);
-            }
-        }
-        Ok(docs)
+        Ok(reader
+            .lines()
+            .filter_map(|line| line.ok())
+            .filter(|line| !line.trim().is_empty())
+            .filter_map(|line| serde_json::from_str(&line).ok())
+            .collect())
     }
 
     pub fn truncate(&mut self) -> std::io::Result<()> {
-        self.writer.flush()?; // clear any pending
-                              // To truncate, we reopen with Write (truncate) mode
+        self.writer.flush()?;
         let file = OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(true)
             .open(&self.path)?;
-
-        // Replace writer
         self.writer = BufWriter::new(file);
         Ok(())
     }
