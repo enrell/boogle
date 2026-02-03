@@ -1,14 +1,15 @@
 use rustc_hash::FxHashMap;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SegmentMeta {
     pub num_docs: u32,
     pub base_doc_id: u32,
     pub total_length: u64,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct IndexMeta {
     pub segments: Vec<String>,
     pub total_docs: u32,
