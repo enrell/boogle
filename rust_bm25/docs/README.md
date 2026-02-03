@@ -19,6 +19,7 @@ This documentation provides system-level insights into how data flows through th
 
 ## High-Level Data Flow
 
+
 ### Indexing Pipeline
 
 ```
@@ -41,6 +42,7 @@ This documentation provides system-level insights into how data flows through th
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
 
 ### Search Pipeline
 
