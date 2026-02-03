@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:16
+    image: postgres:16-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: boogle
@@ -11,7 +11,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER}" ]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -33,7 +33,7 @@ services:
       POSTGRES_DB: boogle
     volumes:
       - ./data:/app/data
-    command: [ "uv", "run", "boogle", "index" ]
+    command: ["uv", "run", "boogle", "index"]
 
   api:
     build: .
@@ -49,7 +49,7 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/app/data
-    command: [ "uv", "run", "boogle", "api" ]
+    command: ["uv", "run", "boogle", "api"]
 
 volumes:
   pgdata:
