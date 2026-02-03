@@ -114,17 +114,29 @@ Boogle exposes two main CLI tools: `boogle` (APP) and `boogle-db` (DB Ops).
 
 ## 📊 Benchmarking
 
-**Search Performance:**
-Measure latency and QPS (Queries Per Second) for the ranking engine.
+Boogle includes a comprehensive benchmark suite to test indexing throughput, ranking latency, and API performance.
+
+**1. Indexing Performance:**
+Measures how fast books can be processed and indexed.
 ```bash
-uv run scripts/benchmark.py --iterations 10
-# Use --sqlite for SQLite mode
+uv run scripts/benchmark.py indexing
 ```
 
-**Indexing Performance:**
-Measure write throughput and indexing speed on a synthetic segment.
+**2. API Stress Test:**
+Measures end-to-end latency and QPS against a running server.
 ```bash
-uv run bench_index.py
+uv run scripts/benchmark.py api --url http://127.0.0.1:8000 --concurrency 10
+```
+
+**3. Internal Library Benchmark:**
+Micro-benchmarks the Rust ranking engine + DB lookups directly.
+```bash
+uv run scripts/benchmark.py library --sqlite
+```
+
+**Run All:**
+```bash
+uv run scripts/benchmark.py all --sqlite
 ```
 
 ---

@@ -1,4 +1,6 @@
+import pytest
 from fastapi.testclient import TestClient
+from unittest.mock import MagicMock
 
 import src.api.main as api_main
 
@@ -6,124 +8,136 @@ import src.api.main as api_main
 class FakeRepository:
     def __init__(self):
         self.storage = {}
-        self.upsert_calls = []
-
-    def upsert_book(self, metadata):
-        self.upsert_calls.append(metadata)
-        key = (metadata["source"], metadata["book_id"])
-        self.storage[key] = metadata
 
     def get_book(self, source, book_id):
-        return self.storage.get((source, book_id))
+        # We only support gutenberg in current API implementation for search results
+        if source == "gutenberg":
+            return self.storage.get(book_id)
+        return None
 
-    def search_books(self, query, limit, source=None):
-        query = query.lower()
-        matches = [
-            {"source": source, "book_id": book_id, "title": data["title"], "url": data["url"]}
-            for (source, book_id), data in self.storage.items()
-            if query in data["title"].lower() or query in (data.get("author") or "").lower()
-        ]
-        if source:
-            matches = [match for match in matches if match["source"] == source]
-        return matches[:limit]
-
-
-class FakeScraper:
-    def __init__(self):
-        self.metadata_map = {}
-        self.search_results = []
-        self.extract_calls = []
-        self.search_calls = []
-
-    def extract_metadata(self, book_id):
-        self.extract_calls.append(book_id)
-        return self.metadata_map[book_id]
-
-    def search_books(self, query, limit):
-        self.search_calls.append((query, limit))
-        return self.search_results[:limit]
-
-
-def make_client(monkeypatch):
-    repo = FakeRepository()
-    scraper = FakeScraper()
-    monkeypatch.setattr(api_main, "database", repo)
-    monkeypatch.setattr(api_main, "sources", {"gutenberg": scraper})
-    client = TestClient(api_main.app)
-    return client, repo, scraper
-
-
-def test_get_metadata_returns_cached_entry(monkeypatch):
-    client, repo, scraper = make_client(monkeypatch)
-    cached = {
-        "source": "gutenberg",
-        "book_id": "1",
-        "url": "http://example.com/1",
-        "title": "Cached Book",
-        "author": "Cached Author",
-        "files": [],
-    }
-    repo.upsert_book(cached)
-
-    response = client.get("/metadata/gutenberg/1")
-
-    assert response.status_code == 200
-    assert response.json()["title"] == "Cached Book"
-    assert scraper.extract_calls == []
-
-
-def test_get_metadata_fetches_and_caches(monkeypatch):
-    client, repo, scraper = make_client(monkeypatch)
-    remote = {
-        "source": "gutenberg",
-        "book_id": "2",
-        "url": "http://example.com/2",
-        "title": "Remote Book",
-        "author": "Remote Author",
-        "files": [{"format": "txt", "url": "http://example.com/file.txt"}],
-    }
-    scraper.metadata_map["2"] = remote
-
-    response = client.get("/metadata/gutenberg/2")
-
-    assert response.status_code == 200
-    assert response.json()["title"] == "Remote Book"
-    cached = repo.get_book("gutenberg", "2")
-    assert cached is not None
-    assert cached["title"] == "Remote Book"
-    assert repo.upsert_calls[-1]["book_id"] == "2"
-    assert scraper.extract_calls == ["2"]
-
-
-def test_search_combines_cache_with_remote_results(monkeypatch):
-    client, repo, scraper = make_client(monkeypatch)
-    repo.upsert_book(
-        {
+    def seed_book(self, book_id, title, author):
+        self.storage[book_id] = {
             "source": "gutenberg",
-            "book_id": "3",
-            "url": "http://example.com/3",
-            "title": "Local Result",
-            "author": "Author",
-            "files": [],
+            "book_id": book_id,
+            "title": title,
+            "author": author,
+            "url": f"http://example.com/{book_id}",
+            "files": []
         }
-    )
-    scraper.search_results = [
-        {"source": "gutenberg", "book_id": "4", "title": "Remote Result", "url": "http://example.com/4"},
-    ]
-    scraper.metadata_map["4"] = {
-        "source": "gutenberg",
-        "book_id": "4",
-        "url": "http://example.com/4",
-        "title": "Remote Result",
-        "author": "Author",
-        "files": [],
-    }
 
-    response = client.get("/search", params={"query": "Result", "limit": 2})
 
+class FakeSearcher:
+    def __init__(self, index_dir):
+        self.results = []
+
+    def set_stopwords(self, stopwords):
+        pass
+
+    def search(self, query, limit):
+        # Returns list of (book_id, score, chunk_id)
+        # Filter results that match query if we wanted to be fancy,
+        # but for mocking we just return pre-configured results
+        return self.results[:limit]
+
+
+@pytest.fixture
+def api_client(monkeypatch):
+    repo = FakeRepository()
+    searcher = FakeSearcher("dummy_dir")
+    
+    # Patch the global variables in api.main
+    monkeypatch.setattr(api_main, "database", repo)
+    monkeypatch.setattr(api_main, "searcher", searcher)
+    
+    with TestClient(api_main.app) as client:
+        yield client, repo, searcher
+
+
+def test_health_check(api_client):
+    client, _, _ = api_client
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "healthy"}
+
+
+def test_get_metadata_found(api_client):
+    client, repo, _ = api_client
+    repo.seed_book("123", "Test Book", "Test Author")
+    
+    response = client.get("/metadata/gutenberg/123")
     assert response.status_code == 200
     data = response.json()
-    returned_ids = {(entry["source"], entry["book_id"]) for entry in data}
-    assert returned_ids == {("gutenberg", "3"), ("gutenberg", "4")}
-    assert repo.get_book("gutenberg", "4") is not None
-    assert scraper.extract_calls == ["4"]
+    assert data["book_id"] == "123"
+    assert data["title"] == "Test Book"
+
+
+def test_get_metadata_not_found(api_client):
+    client, _, _ = api_client
+    response = client.get("/metadata/gutenberg/999")
+    assert response.status_code == 404
+
+
+def test_search_returns_ranked_results(api_client):
+    client, repo, searcher = api_client
+    
+    # Setup Data
+    repo.seed_book("1", "Python Guide", "Guido")
+    repo.seed_book("2", "Rust Guide", "Ferris")
+    
+    # Setup Mock Search Results: (book_id, score, chunk_id)
+    # Book 2 has higher score
+    searcher.results = [
+        ("2", 0.95, 10),
+        ("1", 0.80, 5),
+    ]
+    
+    response = client.get("/search", params={"query": "guide", "limit": 10})
+    
+    assert response.status_code == 200
+    results = response.json()
+    
+    assert len(results) == 2
+    assert results[0]["book_id"] == "2"
+    assert results[0]["title"] == "Rust Guide"
+    assert results[0]["score"] == 0.95
+    
+    assert results[1]["book_id"] == "1"
+    assert results[1]["title"] == "Python Guide"
+
+
+def test_search_filters_unknown_books(api_client):
+    client, repo, searcher = api_client
+    
+    # Only Book 1 is in DB
+    repo.seed_book("1", "Python Guide", "Guido")
+    
+    # Searcher returns Book 1 and Book 999 (which is missing from DB)
+    searcher.results = [
+        ("1", 0.80, 5),
+        ("999", 0.99, 20),
+    ]
+    
+    response = client.get("/search", params={"query": "guide"})
+    results = response.json()
+    
+    # Should only return Book 1
+    assert len(results) == 1
+    assert results[0]["book_id"] == "1"
+
+
+def test_search_deduplicates_chunks(api_client):
+    client, repo, searcher = api_client
+    repo.seed_book("1", "Dedupe Me", "Author")
+    
+    # Searcher returns multiple chunks for same book
+    searcher.results = [
+        ("1", 0.5, 100),
+        ("1", 0.9, 200), # Higher score should win
+        ("1", 0.2, 300),
+    ]
+    
+    response = client.get("/search", params={"query": "test"})
+    results = response.json()
+    
+    assert len(results) == 1
+    assert results[0]["score"] == 0.9

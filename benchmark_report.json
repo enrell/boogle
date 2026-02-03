@@ -1,0 +1,14 @@
+[
+  {
+    "test_type": "indexing",
+    "metrics": {
+      "duration_seconds": 1.433,
+      "books_indexed": 50,
+      "chunks_generated": 30451,
+      "books_per_second": 34.9,
+      "chunks_per_second": 21253.4,
+      "index_size_mb": 5.71
+    },
+    "timestamp": 1770093090.070229
+  }
+]
