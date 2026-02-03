@@ -41,36 +41,30 @@ fn run_pipeline_internal(
 ) -> PyResult<()> {
     let rt = Runtime::new().map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
 
-    let chunks_dir_path = PathBuf::from(&chunks_dir);
-    let index_dir_path = PathBuf::from(&index_dir);
-    fs::create_dir_all(&chunks_dir_path).ok();
-    fs::create_dir_all(&index_dir_path).ok();
-
     let config = Arc::new(PipelineConfig {
-        index_dir: index_dir_path.clone(),
-        chunks_dir: chunks_dir_path.clone(),
+        index_dir: PathBuf::from(&index_dir),
+        chunks_dir: PathBuf::from(&chunks_dir),
         stopwords: Arc::new(stopwords.into_iter().collect()),
     });
+
+    fs::create_dir_all(&config.chunks_dir).ok();
+    fs::create_dir_all(&config.index_dir).ok();
 
     let (tx_raw, rx_raw) = flume_bounded::<RawBook>(50);
     let (tx_processed, rx_processed) = flume_bounded::<ProcessedDoc>(500);
 
-    let indexer_handle = spawn_indexer_stage(rx_processed, config.clone());
-
-    let processor_handles = spawn_processor_stage(rx_raw, tx_processed, config.clone());
+    let indexer_handle = spawn_indexer(rx_processed, config.clone());
+    let _processor_handles = spawn_processors(rx_raw, tx_processed, config.clone());
 
     rt.block_on(async {
-        run_downloader_stage(items, tx_raw, config.chunks_dir.clone()).await;
+        download_books(items, tx_raw, config.chunks_dir.clone()).await;
     });
 
-    drop(processor_handles);
-
     let _ = indexer_handle.join();
-
     Ok(())
 }
 
-fn spawn_indexer_stage(
+fn spawn_indexer(
     rx: flume::Receiver<ProcessedDoc>,
     config: Arc<PipelineConfig>,
 ) -> thread::JoinHandle<()> {
@@ -81,7 +75,6 @@ fn spawn_indexer_stage(
 
         while let Ok(doc) = rx.recv() {
             batch.push(doc);
-
             if batch.len() >= 1000 {
                 write_batch(&mut batch, &mut global_doc_id, &mut segment_id, &config);
             }
@@ -113,85 +106,75 @@ fn write_batch(
     };
 
     match write_segment(batch_data) {
-        Ok(meta) => {
-            *global_doc_id += meta.num_docs;
-        }
-        Err(e) => {
-            eprintln!("Failed to write segment {}: {}", segment_id, e);
-        }
+        Ok(meta) => *global_doc_id += meta.num_docs,
+        Err(e) => eprintln!("Failed to write segment {}: {}", segment_id, e),
     }
 
     *segment_id += 1;
 }
 
-fn spawn_processor_stage(
+fn spawn_processors(
     rx: flume::Receiver<RawBook>,
     tx: flume::Sender<ProcessedDoc>,
     config: Arc<PipelineConfig>,
 ) -> Vec<thread::JoinHandle<()>> {
-    let num_workers = num_cpus::get();
-    let mut handles = Vec::with_capacity(num_workers);
+    (0..num_cpus::get())
+        .map(|_| {
+            let rx = rx.clone();
+            let tx = tx.clone();
+            let config = config.clone();
 
-    for _ in 0..num_workers {
-        let rx = rx.clone();
-        let tx = tx.clone();
-        let config = config.clone();
-
-        handles.push(thread::spawn(move || {
-            while let Ok(raw) = rx.recv() {
-                process_book(raw, &tx, &config);
-            }
-        }));
-    }
-    handles
+            thread::spawn(move || {
+                while let Ok(raw) = rx.recv() {
+                    if let Some(doc) = process_book(raw, &config) {
+                        let _ = tx.send(doc);
+                    }
+                }
+            })
+        })
+        .collect()
 }
 
-fn process_book(raw: RawBook, tx: &flume::Sender<ProcessedDoc>, config: &PipelineConfig) {
+fn process_book(raw: RawBook, config: &PipelineConfig) -> Option<ProcessedDoc> {
     if !should_process(&raw.id, config) {
-        return;
+        return None;
     }
 
-    let text = match parse_bytes(&raw.content, &raw.extension) {
-        Some(t) => t,
-        None => return,
-    };
-
+    let text = parse_bytes(&raw.content, &raw.extension)?;
     let chunks = chunk_text(&text, 1000, 100);
     if chunks.is_empty() {
-        return;
+        return None;
     }
 
     save_content(&raw.id, &chunks, config);
-
-    if let Some(doc) = analyze_content(raw.id, chunks, config) {
-        let _ = tx.send(doc);
-    }
+    analyze_content(raw.id, chunks, config)
 }
 
 fn should_process(id: &str, config: &PipelineConfig) -> bool {
-    let shard = if id.len() < 2 {
-        format!("{:0>2}", id)
-    } else {
-        id[..2].to_string()
-    };
-    let shard_dir = config.chunks_dir.join(&shard);
-    let chunk_path = shard_dir.join(format!("{}.zst", id));
-    !chunk_path.exists()
+    let shard = get_shard(id);
+    !config
+        .chunks_dir
+        .join(&shard)
+        .join(format!("{}.zst", id))
+        .exists()
 }
 
 fn save_content(id: &str, chunks: &[String], config: &PipelineConfig) {
-    let shard = if id.len() < 2 {
+    let shard = get_shard(id);
+    let shard_dir = config.chunks_dir.join(&shard);
+    let _ = fs::create_dir_all(&shard_dir);
+
+    let full_text = chunks.join("\n");
+    if let Ok(compressed) = zstd::stream::encode_all(full_text.as_bytes(), 3) {
+        let _ = fs::write(shard_dir.join(format!("{}.zst", id)), compressed);
+    }
+}
+
+fn get_shard(id: &str) -> String {
+    if id.len() < 2 {
         format!("{:0>2}", id)
     } else {
         id[..2].to_string()
-    };
-    let shard_dir = config.chunks_dir.join(&shard);
-    let chunk_path = shard_dir.join(format!("{}.zst", id));
-
-    let full_text = chunks.join("\n");
-    let _ = fs::create_dir_all(&shard_dir);
-    if let Ok(compressed) = zstd::stream::encode_all(full_text.as_bytes(), 3) {
-        let _ = fs::write(&chunk_path, compressed);
     }
 }
 
@@ -200,8 +183,8 @@ fn analyze_content(
     chunks: Vec<String>,
     config: &PipelineConfig,
 ) -> Option<ProcessedDoc> {
-    let mut chunk_data = Vec::with_capacity(chunks.len());
     let mut bump = bumpalo::Bump::new();
+    let mut chunk_data = Vec::with_capacity(chunks.len());
 
     for chunk in &chunks {
         bump.reset();
@@ -234,7 +217,7 @@ fn analyze_content(
     }
 }
 
-async fn run_downloader_stage(
+async fn download_books(
     items: Vec<(String, String, String)>,
     tx: flume::Sender<RawBook>,
     chunks_dir: PathBuf,
@@ -252,11 +235,7 @@ async fn run_downloader_stage(
         handles.push(tokio::spawn(async move {
             let _permit = sem.acquire().await.unwrap();
 
-            let shard = if id.len() < 2 {
-                format!("{:0>2}", id)
-            } else {
-                id[..2].to_string()
-            };
+            let shard = get_shard(&id);
             if chunks_dir.join(&shard).join(format!("{}.zst", id)).exists() {
                 return;
             }
