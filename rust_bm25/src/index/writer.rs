@@ -46,7 +46,7 @@ pub(crate) fn write_segment(data: BatchData) -> std::io::Result<SegmentMeta> {
 
     let mut sorted_terms: Vec<(String, Vec<(u32, u32)>)> = terms
         .into_iter()
-        .filter(|(_, postings)| postings.len() >= 2)
+        .filter(|(_, postings)| postings.len() >= 1)
         .collect();
     sorted_terms.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
 

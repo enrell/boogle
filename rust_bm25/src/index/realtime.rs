@@ -2,7 +2,7 @@ use crate::index::ram::{Document, RamIndex};
 use crate::index::wal::Wal;
 use crate::search::searcher::FileSearcher;
 use pyo3::prelude::*;
-use rayon::prelude::*;
+
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -33,7 +33,7 @@ impl RealTimeIndexer {
 
         // Load disk index to get base stats
         let disk = FileSearcher::new(&index_dir)?;
-        let mut next_id = disk.num_docs();
+        let next_id = disk.num_docs();
 
         ram.next_doc_id = next_id;
 
@@ -99,7 +99,7 @@ impl RealTimeIndexer {
         let mem = self.memory_index.read().unwrap();
 
         // Parallel search
-        let (mut disk_results, mem_results) =
+        let (disk_results, mem_results) =
             rayon::join(|| disk.search(&query, top_k), || mem.search(&query));
 
         // Merge
