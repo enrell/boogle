@@ -52,9 +52,11 @@ This documentation provides system-level insights into how data flows through th
 │  ┌──────────┐     ┌───────────┐      ┌────────────┐     ┌────────────┐    │
 │  │  Query   │───▶│ Tokenizer │───▶ │ FST Lookup │───▶│ Postings   │    │
 │  │ (Stack)  │     │ (Heap)    │      │ (mmap)     │     │ Iterator   │    │
-│  └──────────┘     └───────────┘      └────────────┘     └────────────┘    │
-│                                                            │              │
-│                                                            ▼              │
+│  └──────────┘     └───────────┘      └────────────┘     └──────┬─────┘    │
+│                                                                │              │
+│   ┌────────────────────────────────────────────────────────────┘              │
+│   │                                                                           │
+│   ▼                                                                           │
 │  ┌────────────────┐    ┌────────────────┐    ┌────────────────────┐       │
 │  │ BM25 Scoring   │───▶│ Top-K Select   │───▶│ Results (Vec)      │       │
 │  │ (Stack/Heap)   │    │ (Heap Min-Heap)│    │ (Heap)             │       │
