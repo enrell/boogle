@@ -19,6 +19,8 @@ This documentation provides system-level insights into how data flows through th
 
 ## High-Level Data Flow
 
+### Indexing Pipeline
+
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         INDEXING PIPELINE                           │
@@ -38,7 +40,11 @@ This documentation provides system-level insights into how data flows through th
 │  └──────────────────────────────────────────────────────────────┘  │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
+```
 
+### Search Pipeline
+
+```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                          SEARCH PIPELINE                            │
 ├─────────────────────────────────────────────────────────────────────┤
@@ -61,11 +67,11 @@ This documentation provides system-level insights into how data flows through th
 
 | Region | Usage | Lifetime |
 |--------|-------|----------|
-| **Stack** | Function locals, small buffers, iterators | Function scope |
-| **Heap** | Documents, term maps, result vectors | Explicit allocation |
-| **Arena (Bump)** | Tokenization scratch space | Batch scope |
-| **mmap** | Segment files (terms.fst, postings) | Process lifetime |
-| **OS Page Cache** | Recently accessed mmap pages | Managed by OS |
+| Stack | Function locals, small buffers, iterators | Function scope |
+| Heap | Documents, term maps, result vectors | Explicit allocation |
+| Arena (Bump) | Tokenization scratch space | Batch scope |
+| mmap | Segment files (terms.fst, postings) | Process lifetime |
+| OS Page Cache | Recently accessed mmap pages | Managed by OS |
 
 ## Thread Model
 
@@ -90,7 +96,10 @@ Main Thread (Python GIL)
 
 ## Context Switching Points
 
-1. **Python ↔ Rust**: PyO3 releases GIL during `py.detach()`
-2. **Rayon Work Stealing**: Automatic load balancing across cores
-3. **mmap Page Faults**: OS handles I/O transparently
-4. **Channel Send/Recv**: Crossbeam bounded channels block when full
+| Switch Type | Location | Overhead |
+|-------------|----------|----------|
+| Python ↔ Rust | `py.detach()` | ~1μs |
+| Rayon Work Stealing | `par_iter()` | ~100ns |
+| mmap Page Faults | Any mmap access | ~1μs + I/O |
+| Channel Send/Recv | Bounded channels | Blocks when full |
+| Lock Acquisition | `RwLock`, `Mutex` | ~50ns uncontended |
