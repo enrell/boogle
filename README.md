@@ -1,8 +1,8 @@
 # 📚 Boogle — Open Source Search Engine for Free Books
 
-**Boogle** is an open-source search engine designed to index and search books from multiple free and public-domain sources.  
-The goal is to make it easy for readers, students, and researchers to find *free and legal* books across the web —  
-without having to visit each site individually.
+**Boogle** is a distinctively fast, open-source search engine designed to index and search public domain books from multiple sources.
+
+It combines a **Python** orchestrator (FastAPI, SQL adapters) with a high-performance **Rust** indexing engine (BM25 ranking, compression) to deliver millisecond-level search latencies over large text corpora.
 
 ---
 
@@ -17,21 +17,28 @@ and returns ranked results according to query relevance — just like a miniatur
 
 ---
 
-## ⚙️ Installation
-
-### Prerequisites
+## 🛠 Prerequisites
 
 - **[Rust](https://www.rust-lang.org/tools/install)** (latest stable)
 - **[uv](https://docs.astral.sh/uv/getting-started/installation/)** (fast Python package installer)
+- **Docker** (optional, for PostgreSQL mode)
 
-### Setup
+---
 
-1. **Install dependencies:**
+## ⚙️ Installation
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/enrell/boogle.git
+   cd boogle
+   ```
+
+2. **Install Python dependencies:**
    ```bash
    uv sync
    ```
 
-2. **Build the Rust extension:**
+3. **Build the Rust indexing extension:**
    ```bash
    uv run maturin develop -m rust_bm25/Cargo.toml --release
    ```
@@ -40,109 +47,85 @@ and returns ranked results according to query relevance — just like a miniatur
 
 ## 🚀 Quick Start
 
-Boogle supports two database backends:
-- **PostgreSQL** (recommended for production)
-- **SQLite** (perfect for demos, development, or environments without PostgreSQL)
+### Option 1: SQLite (Easiest)
+Get started immediately without any external database services.
 
-### Option 1: PostgreSQL Setup (Recommended)
+1. **Seed & Index Books:**
+   This command downloads 1000 books from Gutenberg and builds the search index.
+   ```bash
+   uv run boogle index --limit 1000 --sqlite
+   ```
 
-1. **Start the database:**
+2. **Search via CLI:**
+   ```bash
+   uv run boogle search "liberty and death" --sqlite
+   ```
+
+3. **Start the API Server:**
+   ```bash
+   uv run boogle api --sqlite
+   ```
+   > 📄 API Documentation available at: `http://127.0.0.1:8000/docs`
+
+### Option 2: PostgreSQL (Production)
+Recommended for larger datasets and better concurrency.
+
+1. **Start the Database:**
    ```bash
    docker compose up -d db
    ```
 
-2. **Download books from Project Gutenberg:**
+2. **Run Migrations:**
    ```bash
-   uv run boogle seed --limit 1000
+   uv run boogle-db migrate
    ```
 
-3. **Build the search index:**
+3. **Seed & Index Books:**
    ```bash
-   uv run boogle index
+   uv run boogle index --limit 1000
    ```
 
-4. **Start the API server:**
+4. **Start the API Server:**
    ```bash
    uv run boogle api
    ```
 
-5. **Try it out:**
-   - API Docs: `http://127.0.0.1:8000/docs`
-   - Search: `uv run boogle search "love and war"`
+---
 
-### Option 2: SQLite Setup (No Docker Required!)
+## 📖 CLI Reference
 
-Perfect for trying out Boogle without PostgreSQL:
+Boogle exposes two main CLI tools: `boogle` (APP) and `boogle-db` (DB Ops).
 
-1. **Download books from Project Gutenberg:**
-   ```bash
-   uv run boogle seed --limit 1000 --sqlite
-   ```
+### `boogle` - Application Pipeline
+| Command | Description | Flags |
+|---------|-------------|-------|
+| `index` | Downloads books and builds the BM25 index | `--limit N` `--sqlite` `--workers N` `--reindex` |
+| `search` | Performs a search query via CLI | `query` `--top-k N` `--sqlite` |
+| `api` | Starts the FastAPI server | `--port N` `--host 0.0.0.0` `--sqlite` |
 
-2. **Update metadata (important for SQLite!):**
-   ```bash
-   uv run boogle update-metadata --sqlite
-   ```
-
-3. **Build the search index:**
-   ```bash
-   uv run boogle index --full --sqlite
-   ```
-
-4. **Start the API server:**
-   ```bash
-   uv run boogle api --sqlite
-   ```
-
-5. **Try it out:**
-   - API Docs: `http://127.0.0.1:8000/docs`
-   - Search: `uv run boogle search "independence" --sqlite`
-
-### CLI Commands Reference
-
-| Command | Description | SQLite Flag |
-|---------|-------------|-------------|
-| `boogle seed --limit N` | Download N books from Gutenberg | `--sqlite` |
-| `boogle update-metadata` | Update metadata for downloaded books | `--sqlite` |
-| `boogle index` | Build/update search index | `--sqlite` |
-| `boogle index --full` | Full reindex (clears existing data) | `--sqlite` |
-| `boogle search "query"` | Search from CLI | `--sqlite` |
-| `boogle api` | Start the FastAPI server | `--sqlite` |
-
-**Note:** The SQLite database is stored at `data/boogle.db` by default.
+### `boogle-db` - Database Management (Postgres)
+| Command | Description |
+|---------|-------------|
+| `migrate` | Creates necessary tables (`books`, `seed_offsets`) |
+| `clear-all`| Truncates all tables (Data Reset) |
+| `test` | Verifies database connection and schema |
 
 ---
 
 ## 📊 Benchmarking
 
-You can run a performance benchmark to measure query latency, throughput (QPS), and index statistics:
-
+**Search Performance:**
+Measure latency and QPS (Queries Per Second) for the ranking engine.
 ```bash
-uv run scripts/benchmark.py
+uv run scripts/benchmark.py --iterations 10
+# Use --sqlite for SQLite mode
 ```
 
-## Benchmarking with SQLite
-
+**Indexing Performance:**
+Measure write throughput and indexing speed on a synthetic segment.
 ```bash
-uv run scripts/benchmark.py --sqlite
+uv run bench_index.py
 ```
-
-Options:
-- `--iterations N`: Number of iterations per query (default: 5)
-- `--warmup N`: Number of warmup runs (default: 2)
-
----
-
-## 🌐 Data Sources
-
-- [x] [Project Gutenberg](https://www.gutenberg.org/)
-- [ ] [Open Library](https://openlibrary.org/)
-- [ ] [Wikisource](https://wikisource.org/)
-- [ ] [Public Domain Library](https://publicdomainlibrary.org/)
-- [ ] [Internet Archive](https://archive.org/details/texts)
-- [ ] [Domínio Público (Brazil)](http://www.dominiopublico.gov.br/)
-
-Contact: **[enrellsa10@proton.me](mailto:enrellsa10@proton.me)**
 
 ---
 
@@ -150,7 +133,5 @@ Contact: **[enrellsa10@proton.me](mailto:enrellsa10@proton.me)**
 
 This project is open-source under the **MIT License**.
 Feel free to fork, modify, and improve!
-
----
 
 > *Boogle — Free Books. Free Knowledge.*
