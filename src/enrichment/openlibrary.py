@@ -1,14 +1,16 @@
 """
-Open Library API Integration
-----------------------------
-Fetches enriched metadata from Open Library to improve ranking with social signals.
+Open Library Enrichment
+-----------------------
+Fetches enriched metadata from a local SQLite copy of Open Library data 
+to improve ranking with social signals.
 """
 
-import requests
-import time
-from typing import Optional, Dict
-from dataclasses import dataclass
+import sqlite3
+import json
 import logging
+import os
+from typing import Optional
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -48,102 +50,77 @@ class EnrichedMetadata:
 
 
 class OpenLibraryClient:
-    """Client for Open Library API"""
+    """
+    Client for Open Library enrichment using local SQLite dump.
+    Replaces the API client to avoid rate limits and network latency.
+    """
     
-    BASE_URL = "https://openlibrary.org"
-    
-    def __init__(self, cache_dir: str = "data/metadata_cache"):
-        self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": "Boogle/1.0 (Educational Search Engine)"
-        })
-        # Rate limiting: Open Library allows ~100 req/min
-        self.last_request_time = 0
-        self.min_request_interval = 0.6  # seconds
+    def __init__(self, db_path: str = "data/openlibrary.db"):
+        self.db_path = db_path
         
-    def _rate_limit(self):
-        elapsed = time.time() - self.last_request_time
-        if elapsed < self.min_request_interval:
-            time.sleep(self.min_request_interval - elapsed)
-        self.last_request_time = time.time()
-        
-    def search_by_title_author(self, title: str, author: str) -> Optional[str]:
-        """
-        Search for a book and return its Open Library work ID (OLID).
-        """
+    def _get_connection(self):
+        if not os.path.exists(self.db_path):
+            raise FileNotFoundError(f"Open Library database not found at {self.db_path}. Run 'python3 scripts/manage_dumps.py' first.")
+            
         try:
-            self._rate_limit()
+            return sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)
+        except sqlite3.OperationalError:
+            # Fallback for standard connection if URI fails
+            return sqlite3.connect(self.db_path)
             
-            query = f"title:{title}"
-            if author and author != "Unknown":
-                author_clean = author.split(",")[0].strip()
-                query += f" author:{author_clean}"
-                
-            params = {
-                "q": query,
-                "limit": 1,
-                "fields": "key"
-            }
-            
-            resp = self.session.get(
-                f"{self.BASE_URL}/search.json",
-                params=params,
-                timeout=5
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            
-            if data.get("docs"):
-                work_key = data["docs"][0].get("key")
-                if work_key:
-                    # Extract OLID from /works/OL123W
-                    return work_key.split("/")[-1]
-                    
-        except Exception as e:
-            logger.debug(f"Open Library search failed for '{title}': {e}")
-            
-        return None
-        
-    def get_work_metadata(self, olid: str) -> Optional[EnrichedMetadata]:
-        """
-        Fetch detailed metadata for a work by OLID.
-        """
-        try:
-            self._rate_limit()
-            
-            resp = self.session.get(
-                f"{self.BASE_URL}/works/{olid}.json",
-                timeout=5
-            )
-            resp.raise_for_status()
-            work_data = resp.json()
-            
-            # Fetch ratings
-            ratings_resp = self.session.get(
-                f"{self.BASE_URL}/works/{olid}/ratings.json",
-                timeout=5
-            )
-            ratings_data = ratings_resp.json() if ratings_resp.status_code == 200 else {}
-            
-            return EnrichedMetadata(
-                ratings_average=ratings_data.get("summary", {}).get("average"),
-                ratings_count=ratings_data.get("summary", {}).get("count"),
-                want_to_read_count=work_data.get("readinglog_count"),
-                edition_count=len(work_data.get("editions", [])) if "editions" in work_data else None,
-                subjects=work_data.get("subjects", [])[:5]  # Top 5 subjects
-            )
-            
-        except Exception as e:
-            logger.debug(f"Failed to fetch work metadata for {olid}: {e}")
-            
-        return None
-        
     def enrich_book(self, title: str, author: str) -> Optional[EnrichedMetadata]:
         """
-        Full enrichment pipeline: search + fetch metadata.
+        Look up a book in the local database using FTS.
         """
-        olid = self.search_by_title_author(title, author)
-        if not olid:
+        if not title:
             return None
             
-        return self.get_work_metadata(olid)
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            
+            # Simple FTS query
+            # We strip special chars that might break FTS syntax
+            clean_title = "".join(c for c in title if c.isalnum() or c.isspace())
+            clean_author = "".join(c for c in author if c.isalnum() or c.isspace()) if author else ""
+            
+            query_str = f'"{clean_title}"'
+            # Author names are not currently in the works dump (only keys), so we can't reliably FTS them yet.
+            # if clean_author and clean_author != "Unknown":
+            #    query_str += f' AND "{clean_author}"'
+            
+            # Use FTS to find best match
+            # Order by rank is implicit in FTS, but we can also check for exact title match in results
+            cursor.execute("""
+                SELECT 
+                    ratings_average, 
+                    ratings_count, 
+                    want_to_read_count, 
+                    edition_count, 
+                    subjects 
+                FROM works_fts 
+                JOIN works ON works_fts.rowid = works.rowid
+                WHERE works_fts MATCH ? 
+                ORDER BY rank 
+                LIMIT 1
+            """, (query_str,))
+            
+            row = cursor.fetchone()
+            conn.close()
+            
+            if row:
+                subjects_json = row[4]
+                subjects = json.loads(subjects_json) if subjects_json else []
+                
+                return EnrichedMetadata(
+                    ratings_average=row[0],
+                    ratings_count=row[1],
+                    want_to_read_count=row[2],
+                    edition_count=row[3],
+                    subjects=subjects
+                )
+                
+        except Exception as e:
+            logger.debug(f"Open Library lookup failed for '{title}': {e}")
+            
+        return None

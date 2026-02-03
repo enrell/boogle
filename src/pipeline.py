@@ -10,6 +10,10 @@ from src.indexer.stopwords import load_stopwords
 from src.db.database import PostgresRepository
 
 
+from src.enrichment.openlibrary import OpenLibraryClient
+from src.enrichment.service import enrich_books_service
+
+
 def run_index_pipeline(
     limit: int | None = None,
     batch_size: int = 1000,
@@ -18,11 +22,12 @@ def run_index_pipeline(
     chunk_size: int = 1000,
     chunk_overlap: int = 100,
     workers: int = 16,
+    enrich: bool = False,
 ):
     """
     Runs the complete indexing pipeline:
     1. Download/Seed books (incremental/persistent).
-    2. Update Metadata in DB (Postgres or SQLite).
+    2. Enrich metadata (optional).
     3. Build BM25 Index (full re-index of available files).
     """
     books_dir = os.getenv("BOOKS_DIR", "data/books")
@@ -33,6 +38,27 @@ def run_index_pipeline(
     seeder = BookSeeder(output_dir=books_dir, max_workers=workers, use_sqlite=use_sqlite)
     seeded_total = seeder.seed_all(limit=limit, batch_size=batch_size)
     print(f"Seeding complete. Total new/verified books in this run: {seeded_total}")
+
+    if enrich:
+        print(f"\n--- Step 1.5: Enriching Metadata ---")
+        db_valid = True
+        # Check if OL DB exists before trying to verify
+        if not os.path.exists("data/openlibrary.db") and not os.path.exists("data/test_openlibrary.db"):
+             # Simple check, though OpenLibraryClient also checks.
+             # We let the service handle it but catch errors to not break pipeline
+             pass
+
+        try:
+             # Use the alias or class directly. BookSeeder uses PostgresRepository internally,
+             # so we should use a compatible way.
+             db_manager = PostgresRepository(use_sqlite=use_sqlite)
+             ol_client = OpenLibraryClient()
+             
+             enrich_books_service(db_manager, ol_client, limit=limit)
+             db_manager.close()
+        except Exception as e:
+             print(f"Enrichment failed: {e}")
+             print("Continuing with indexing...")
 
     print(f"\n--- Step 2: Building Index (Reindex={reindex}) ---")
     Path(index_dir).mkdir(parents=True, exist_ok=True)
@@ -83,7 +109,11 @@ def search(query: str, top_k: int = 10, use_sqlite: bool = False):
         if meta:
             title = meta.get("title", "Unknown")
             author = meta.get("author", "Unknown")
-            print(f"[{score:.4f}] {title} by {author} (book={book_id})")
+            # Show rating if available
+            rating = meta.get("ratings_average")
+            rating_str = f" [Rating: {rating:.1f}]" if rating else ""
+            
+            print(f"[{score:.4f}] {title} by {author}{rating_str} (book={book_id})")
             count += 1
             if count >= top_k:
                 break
@@ -113,6 +143,7 @@ def main():
     idx_parser.add_argument('--workers', type=int, default=16, help='Number of worker threads for seeding')
     idx_parser.add_argument('--chunk-size', type=int, default=1000, help='Text chunk size')
     idx_parser.add_argument('--chunk-overlap', type=int, default=100, help='Text chunk overlap')
+    idx_parser.add_argument('--enrich', action='store_true', help='Enrich metadata from Open Library')
     
     search_parser = subparsers.add_parser('search', help='Search the index')
     search_parser.add_argument('query', help='Search query')
@@ -134,7 +165,8 @@ def main():
             reindex=args.reindex,
             chunk_size=args.chunk_size,
             chunk_overlap=args.chunk_overlap,
-            workers=args.workers
+            workers=args.workers,
+            enrich=args.enrich
         )
     elif args.command == 'search':
         search(args.query, args.top_k, args.sqlite)
