@@ -173,7 +173,47 @@ impl<'a> PostingsIter<'a> {
         }
     }
 
-    fn decode_varint(&self, data: &[u8], mut pos: usize) -> (u32, usize) {
+    fn refill_buffer(&mut self) {
+        if self.count_left >= BLOCK_LEN {
+            // Inline decompress for doc_buffer
+            let bits = self.doc_data[self.doc_pos];
+            self.doc_pos += 1;
+            let bytes = (bits as usize) * 16;
+            self.bitpacker.decompress(
+                &self.doc_data[self.doc_pos..self.doc_pos + bytes],
+                &mut self.doc_buffer,
+                bits,
+            );
+            self.doc_pos += bytes;
+
+            // Inline decompress for freq_buffer
+            let bits = self.freq_data[self.freq_pos];
+            self.freq_pos += 1;
+            let bytes = (bits as usize) * 16;
+            self.bitpacker.decompress(
+                &self.freq_data[self.freq_pos..self.freq_pos + bytes],
+                &mut self.freq_buffer,
+                bits,
+            );
+            self.freq_pos += bytes;
+
+            self.buffer_len = BLOCK_LEN;
+        } else {
+            for i in 0..self.count_left {
+                let (delta, new_pos) = Self::decode_varint_static(self.doc_data, self.doc_pos);
+                self.doc_pos = new_pos;
+                self.doc_buffer[i] = delta;
+
+                let (tf, new_pos) = Self::decode_varint_static(self.freq_data, self.freq_pos);
+                self.freq_pos = new_pos;
+                self.freq_buffer[i] = tf;
+            }
+            self.buffer_len = self.count_left;
+        }
+        self.buffer_idx = 0;
+    }
+
+    fn decode_varint_static(data: &[u8], mut pos: usize) -> (u32, usize) {
         let mut result = 0u32;
         let mut shift = 0;
         loop {
@@ -189,35 +229,6 @@ impl<'a> PostingsIter<'a> {
             shift += 7;
         }
         (result, pos)
-    }
-
-    fn decompress_block(&mut self, data: &[u8], pos: &mut usize, output: &mut [u32; BLOCK_LEN]) {
-        let bits = data[*pos];
-        *pos += 1;
-        let bytes = (bits as usize) * 16;
-        self.bitpacker
-            .decompress(&data[*pos..*pos + bytes], output, bits);
-        *pos += bytes;
-    }
-
-    fn refill_buffer(&mut self) {
-        if self.count_left >= BLOCK_LEN {
-            self.decompress_block(self.doc_data, &mut self.doc_pos, &mut self.doc_buffer);
-            self.decompress_block(self.freq_data, &mut self.freq_pos, &mut self.freq_buffer);
-            self.buffer_len = BLOCK_LEN;
-        } else {
-            for i in 0..self.count_left {
-                let (delta, new_pos) = self.decode_varint(self.doc_data, self.doc_pos);
-                self.doc_pos = new_pos;
-                self.doc_buffer[i] = delta;
-
-                let (tf, new_pos) = self.decode_varint(self.freq_data, self.freq_pos);
-                self.freq_pos = new_pos;
-                self.freq_buffer[i] = tf;
-            }
-            self.buffer_len = self.count_left;
-        }
-        self.buffer_idx = 0;
     }
 }
 

@@ -116,10 +116,10 @@ fn build_inverted_index(
     terms
 }
 
-fn build_offsets(
-    sorted_terms: &[(String, Vec<(u32, u32)>)],
+fn build_offsets<'a>(
+    sorted_terms: &'a [(String, Vec<(u32, u32)>)],
     encoded_postings: &[(Vec<u8>, Vec<u8>)],
-) -> (Vec<(&str, u64)>, Vec<u8>) {
+) -> (Vec<(&'a str, u64)>, Vec<u8>) {
     let mut term_offsets = Vec::with_capacity(sorted_terms.len());
     let mut offsets_data = Vec::with_capacity(sorted_terms.len() * OFFSET_SIZE);
     let mut current_offset_doc = 0u64;
@@ -265,7 +265,6 @@ fn index_corpus_internal(
     chunk_overlap: usize,
     batch_size: usize,
 ) -> PyResult<(u32, u32)> {
-    use glob::glob;
     use std::time::Instant;
 
     let start = Instant::now();
