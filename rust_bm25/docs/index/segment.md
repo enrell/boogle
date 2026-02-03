@@ -93,40 +93,40 @@ pub struct BatchData {
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    ProcessedDoc Creation                         │
+│                    ProcessedDoc Creation                        │
 ├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
+│                                                                 │
 │  1. Parse file → String (heap allocated, ~100KB-10MB)           │
-│                    │                                             │
-│  2. chunk_text()   ▼                                             │
+│                    │                                            │
+│  2. chunk_text()   ▼                                            │
 │     ┌──────────────────────────────────────────┐                │
-│     │ Vec<String> chunks                        │                │
-│     │ Each chunk: ~1KB text                     │                │
+│     │ Vec<String> chunks                       │                │
+│     │ Each chunk: ~1KB text                    │                │
 │     └──────────────────────────────────────────┘                │
-│                    │                                             │
+│                    │                                            │
 │  3. analyze_arena() │  (Arena allocator - fast, bulk dealloc)   │
-│                    ▼                                             │
+│                    ▼                                            │
 │     ┌──────────────────────────────────────────┐                │
 │     │ Vec<&str> tokens (pointers into arena)   │                │
 │     └──────────────────────────────────────────┘                │
-│                    │                                             │
-│  4. Build freq map │                                             │
-│                    ▼                                             │
+│                    │                                            │
+│  4. Build freq map │                                            │
+│                    ▼                                            │
 │     ┌──────────────────────────────────────────┐                │
 │     │ FxHashMap<String, u32>                   │                │
 │     │ Keys: owned strings (copied from arena)  │                │
 │     │ Values: term frequencies                 │                │
 │     └──────────────────────────────────────────┘                │
-│                    │                                             │
-│  5. Bundle into    │                                             │
-│     ProcessedDoc   ▼                                             │
+│                    │                                            │
+│  5. Bundle into    │                                            │
+│     ProcessedDoc   ▼                                            │
 │     ┌──────────────────────────────────────────┐                │
 │     │ ProcessedDoc {                           │                │
 │     │   book_id: "abc123",                     │                │
 │     │   chunks: [(len, freq_map), ...]         │                │
 │     │ }                                        │                │
 │     └──────────────────────────────────────────┘                │
-│                                                                  │
+│                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

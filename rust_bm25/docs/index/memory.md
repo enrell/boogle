@@ -27,44 +27,44 @@ pub struct BM25Index {
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         BM25Index MEMORY                             │
+│                         BM25Index MEMORY                            │
 ├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  Stack (BM25Index):                                                  │
+│                                                                     │
+│  Stack (BM25Index):                                                 │
 │  ┌──────────────────────────────────────────────────────────┐       │
 │  │ data: IndexData (inline, ~100 bytes)                     │       │
 │  │ pending: FxHashMap (24 bytes ptr)                        │       │
 │  └──────────────────────────────────────────────────────────┘       │
-│                                                                      │
+│                                                                     │
 │  Heap (IndexData.terms):                                            │
 │  ┌──────────────────────────────────────────────────────────┐       │
 │  │ HashMap buckets array (power of 2)                       │       │
 │  │  └── Entry: (hash, String key, Vec<u8> encoded postings) │       │
-│  │                                                           │       │
+│  │                                                          │       │
 │  │ Example for "hello" with 1000 postings:                  │       │
 │  │  Key: "hello" (5 + 24 = 29 bytes)                        │       │
 │  │  Value: ~2KB compressed postings                         │       │
 │  └──────────────────────────────────────────────────────────┘       │
-│                                                                      │
+│                                                                     │
 │  Heap (IndexData.doc_lengths):                                      │
 │  ┌──────────────────────────────────────────────────────────┐       │
 │  │ Contiguous array: [u32; num_docs]                        │       │
 │  │ 1M docs = 4MB                                            │       │
 │  └──────────────────────────────────────────────────────────┘       │
-│                                                                      │
+│                                                                     │
 │  Heap (IndexData.doc_metadata):                                     │
 │  ┌──────────────────────────────────────────────────────────┐       │
 │  │ Vec of String pointers → individual heap allocations     │       │
 │  │ Fragmented memory, consider arena for production         │       │
 │  └──────────────────────────────────────────────────────────┘       │
-│                                                                      │
+│                                                                     │
 │  Heap (pending):                                                    │
 │  ┌──────────────────────────────────────────────────────────┐       │
 │  │ Staging area for documents not yet finalized             │       │
 │  │ Term → [(doc_id, freq), ...]                             │       │
 │  │ Grows during add_document(), cleared on finalize()       │       │
 │  └──────────────────────────────────────────────────────────┘       │
-│                                                                      │
+│                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -74,20 +74,20 @@ pub struct BM25Index {
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    DOCUMENT INSERTION FLOW                           │
+│                    DOCUMENT INSERTION FLOW                          │
 ├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
+│                                                                     │
 │  Phase 1: add_document() - O(tokens)                                │
 │  ┌───────────────────────────────────────────────────────────┐      │
 │  │ 1. Tokenize text → Vec<String>                            │      │
 │  │ 2. Build FxHashMap<&str, u32> (term → freq)               │      │
 │  │ 3. Append to pending: term → [(doc_id, freq), ...]        │      │
 │  │ 4. Store doc_length and metadata                          │      │
-│  │                                                            │      │
+│  │                                                           │      │
 │  │ Memory: ~O(unique_tokens) per document                    │      │
 │  │ No encoding, no compression                               │      │
 │  └───────────────────────────────────────────────────────────┘      │
-│                                                                      │
+│                                                                     │
 │  Phase 2: finalize() - O(total_postings)                            │
 │  ┌───────────────────────────────────────────────────────────┐      │
 │  │ 1. Compute avgdl from doc_lengths                         │      │
@@ -96,11 +96,11 @@ pub struct BM25Index {
 │  │    - Merge with existing (if any)                         │      │
 │  │    - Update term_df                                       │      │
 │  │ 3. Clear pending HashMap                                  │      │
-│  │                                                            │      │
+│  │                                                           │      │
 │  │ Memory: Postings compressed ~4x                           │      │
 │  │ High CPU for encoding                                     │      │
 │  └───────────────────────────────────────────────────────────┘      │
-│                                                                      │
+│                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -167,11 +167,11 @@ rkyv::deserialize()
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                    PARALLEL BOOK PROCESSING                          │
+│                    PARALLEL BOOK PROCESSING                         │
 ├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
+│                                                                     │
 │  Input: Vec<(path, metadata)>                                       │
-│                                                                      │
+│                                                                     │
 │  Rayon par_iter()                                                   │
 │  ┌───────────────────────────────────────────────────────────┐      │
 │  │ Thread 0          │ Thread 1          │ Thread N          │      │
@@ -181,17 +181,17 @@ rkyv::deserialize()
 │  │ │ build freqs   │ │ │ build freqs   │ │ │ build freqs   │ │      │
 │  │ └───────────────┘ │ └───────────────┘ │ └───────────────┘ │      │
 │  └───────────────────────────────────────────────────────────┘      │
-│                              │                                       │
-│                              ▼                                       │
+│                              │                                      │
+│                              ▼                                      │
 │  ┌───────────────────────────────────────────────────────────┐      │
 │  │ merge_results()                                           │      │
 │  │ - Combine all term maps (sequential, single thread)       │      │
 │  │ - Collect all doc records                                 │      │
 │  └───────────────────────────────────────────────────────────┘      │
-│                              │                                       │
-│                              ▼                                       │
+│                              │                                      │
+│                              ▼                                      │
 │  Output: (docs, term_postings, total_length)                        │
-│                                                                      │
+│                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 

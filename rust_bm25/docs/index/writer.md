@@ -7,10 +7,10 @@ Orchestrates the complete indexing pipeline from raw files to on-disk segments. 
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│                         INDEXING ARCHITECTURE                         │
+│                         INDEXING ARCHITECTURE                        │
 ├──────────────────────────────────────────────────────────────────────┤
-│                                                                       │
-│  Main Thread                                                          │
+│                                                                      │
+│  Main Thread                                                         │
 │  ┌─────────────────────────────────────────────────────────────────┐ │
 │  │ 1. Collect book files (glob)                                    │ │
 │  │ 2. Spawn writer thread                                          │ │
@@ -19,16 +19,16 @@ Orchestrates the complete indexing pipeline from raw files to on-disk segments. 
 │  │    - Send BatchData through channel                             │ │
 │  │ 4. Wait for writer thread                                       │ │
 │  └─────────────────────────────────────────────────────────────────┘ │
-│         │                                                             │
-│         │ crossbeam::bounded(1)                                       │
-│         ▼                                                             │
-│  Writer Thread                                                        │
+│         │                                                            │
+│         │ crossbeam::bounded(1)                                      │
+│         ▼                                                            │
+│  Writer Thread                                                       │
 │  ┌─────────────────────────────────────────────────────────────────┐ │
 │  │ Loop: recv BatchData                                            │ │
 │  │   - write_segment()                                             │ │
 │  │   - Accumulate SegmentMeta results                              │ │
 │  └─────────────────────────────────────────────────────────────────┘ │
-│                                                                       │
+│                                                                      │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -96,43 +96,43 @@ Input: BatchData (heap, ~100MB)
 ┌─────────────────────────────────────────────────────────────────┐
 │ 1. collect_chunks()                                             │
 │    Flatten ProcessedDoc → parallel arrays                       │
-│    ┌────────────────────────────────────────────────────────┐  │
-│    │ book_ids: Vec<String>        ~10KB                     │  │
-│    │ chunk_to_book: Vec<u16>      ~2 bytes/chunk            │  │
-│    │ doc_lengths: Vec<u32>        ~4 bytes/chunk            │  │
-│    │ chunk_freq_maps: Vec<...>    ~1KB/chunk                │  │
-│    └────────────────────────────────────────────────────────┘  │
+│    ┌────────────────────────────────────────────────────────┐   │
+│    │ book_ids: Vec<String>        ~10KB                     │   │
+│    │ chunk_to_book: Vec<u16>      ~2 bytes/chunk            │   │
+│    │ doc_lengths: Vec<u32>        ~4 bytes/chunk            │   │
+│    │ chunk_freq_maps: Vec<...>    ~1KB/chunk                │   │
+│    └────────────────────────────────────────────────────────┘   │
 │                                                                 │
 │ 2. build_inverted_index()                                       │
 │    Aggregate term→postings across all chunks                    │
-│    ┌────────────────────────────────────────────────────────┐  │
-│    │ FxHashMap<String, Vec<(u32, u32)>>                     │  │
-│    │ Key: term string                                       │  │
-│    │ Value: [(doc_id, freq), ...]                           │  │
-│    │ Total size: ~50MB-200MB depending on vocabulary        │  │
-│    └────────────────────────────────────────────────────────┘  │
+│    ┌────────────────────────────────────────────────────────┐   │
+│    │ FxHashMap<String, Vec<(u32, u32)>>                     │   │
+│    │ Key: term string                                       │   │
+│    │ Value: [(doc_id, freq), ...]                           │   │
+│    │ Total size: ~50MB-200MB depending on vocabulary        │   │
+│    └────────────────────────────────────────────────────────┘   │
 │                                                                 │
 │ 3. Sort terms (par_sort_unstable)                               │
 │    In-place sorting, no extra allocation                        │
 │                                                                 │
 │ 4. Parallel encode postings                                     │
-│    ┌────────────────────────────────────────────────────────┐  │
-│    │ Rayon par_iter():                                      │  │
-│    │   encode_postings_separated() for each term            │  │
-│    │   Output: (Vec<u8>, Vec<u8>) per term                  │  │
-│    └────────────────────────────────────────────────────────┘  │
+│    ┌────────────────────────────────────────────────────────┐   │
+│    │ Rayon par_iter():                                      │   │
+│    │   encode_postings_separated() for each term            │   │
+│    │   Output: (Vec<u8>, Vec<u8>) per term                  │   │
+│    └────────────────────────────────────────────────────────┘   │
 │                                                                 │
 │ 5. Build FST (terms → index)                                    │
-│    ┌────────────────────────────────────────────────────────┐  │
-│    │ fst::Map::from_iter()                                  │  │
-│    │ Streaming construction, ~1.5x input size               │  │
-│    └────────────────────────────────────────────────────────┘  │
+│    ┌────────────────────────────────────────────────────────┐   │
+│    │ fst::Map::from_iter()                                  │   │
+│    │ Streaming construction, ~1.5x input size               │   │
+│    └────────────────────────────────────────────────────────┘   │
 │                                                                 │
 │ 6. Write files (sequential I/O)                                 │
-│    ┌────────────────────────────────────────────────────────┐  │
-│    │ fs::write() for each file                              │  │
-│    │ Files: terms.fst, offsets.bin, postings_*.bin, etc.    │  │
-│    └────────────────────────────────────────────────────────┘  │
+│    ┌────────────────────────────────────────────────────────┐   │
+│    │ fs::write() for each file                              │   │
+│    │ Files: terms.fst, offsets.bin, postings_*.bin, etc.    │   │
+│    └────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

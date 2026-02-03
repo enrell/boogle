@@ -29,26 +29,26 @@ Newline-delimited JSON (NDJSON):
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         WAL WRITE PATH                           │
+│                         WAL WRITE PATH                          │
 ├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
+│                                                                 │
 │  Document (Rust heap)                                           │
-│       │                                                          │
-│       ▼                                                          │
+│       │                                                         │
+│       ▼                                                         │
 │  serde_json::to_string()                                        │
 │       │ Allocates: ~2x document size                            │
-│       ▼                                                          │
+│       ▼                                                         │
 │  BufWriter (8KB default buffer)                                 │
-│       │ Copies into buffer                                       │
-│       ▼                                                          │
-│  flush()                                                         │
+│       │ Copies into buffer                                      │
+│       ▼                                                         │
+│  flush()                                                        │
 │       │ System call: write() to kernel                          │
-│       ▼                                                          │
-│  OS Page Cache                                                   │
+│       ▼                                                         │
+│  OS Page Cache                                                  │
 │       │ Async write to disk (unless fsync)                      │
-│       ▼                                                          │
-│  Disk                                                            │
-│                                                                  │
+│       ▼                                                         │
+│  Disk                                                           │
+│                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
