@@ -25,7 +25,7 @@ def run_index_pipeline(
     2. Update Metadata in DB (Postgres or SQLite).
     3. Build BM25 Index (full re-index of available files).
     """
-    books_dir = "data/books"
+    books_dir = os.getenv("BOOKS_DIR", "data/books")
     index_dir = os.getenv("INDEX_DIR", "data/index")
     chunks_dir = os.getenv("CHUNKS_DIR", "data/chunks")
     
