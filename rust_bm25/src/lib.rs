@@ -6,8 +6,6 @@ mod document;
 mod index;
 mod pipeline;
 mod search;
-mod store;
-mod util;
 
 use analysis::analyze;
 use codecs::{decode_postings, encode_postings, merge_postings};

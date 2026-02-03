@@ -196,7 +196,7 @@ pub fn chunk_text(text: &str, chunk_size: usize, overlap: usize) -> Vec<String> 
     chunks
 }
 
-fn find_word_boundary(text: &str, indices: &[usize], start: usize, mut end: usize) -> usize {
+fn find_word_boundary(text: &str, indices: &[usize], start: usize, end: usize) -> usize {
     let search_limit = (end.saturating_sub(100)).max(start);
 
     for i in (search_limit..end).rev() {
