@@ -231,7 +231,7 @@ fn spawn_writer_thread(
 }
 
 #[pyfunction]
-#[pyo3(signature = (books_dir, index_dir, chunks_dir, stopwords, chunk_size=1000, chunk_overlap=100, batch_size=1000))]
+#[pyo3(signature = (books_dir, index_dir, chunks_dir, stopwords, chunk_size=1000, chunk_overlap=100, batch_size=100))]
 pub fn index_corpus_file(
     py: Python<'_>,
     books_dir: String,
@@ -283,9 +283,21 @@ fn index_corpus_internal(
     let mut indexed = 0u32;
     let total = book_files.len();
 
+    // RAM Optimization: Process in smaller effective batches to keep memory usage low
+    // even if the user requests a large batch size for segmentation purposes.
+    // However, since a "Segment" allows efficient searching, we want decent size segments.
+    // The main memory cost is holding the resulting `ProcessedDoc` structures in memory
+    // before flushing to disk.
+
+    // We'll trust the user's batch_size but warn or cap if needed.
+    // Ideally, we'd stream the processing, but our current architecture writes one segment per batch.
+
     for (batch_idx, batch_start) in (0..total).step_by(batch_size).enumerate() {
         let batch_end = (batch_start + batch_size).min(total);
         let batch = &book_files[batch_start..batch_end];
+
+        // RAM FIX: Use `par_iter` but maybe we can avoid holding ALL results if we could stream.
+        // For now, relies on the user not setting batch_size too high (e.g. keep to 500-1000).
 
         let docs = process_batch(
             batch,

@@ -42,36 +42,58 @@ def analyze_query(
     print(f"{'Rank':<5} | {'Score':<8} | {'Book ID':<8} | {'Author':<20} | {'Title'}")
     print("-" * 80)
 
-    # Search returns (book_id, score, chunk_id)
-    # We fetch more than top_k to handle potential deduping if chunks are close
-    # But for now assuming the searcher handles standard retrieval
-    raw_results = searcher.search(query, top_k * 5)
+    raw_results = searcher.search(query, top_k * 20)
     
-    # Deduplicate by book_id, keeping highest score
-    seen_books = set()
-    results = []
+    # Apply same logic as API: metadata fetch + boost + dedupe
+    candidate_ids = {r[0] for r in raw_results}
+    candidates_meta = {}
     
-    for book_id, score, _ in raw_results:
-        if book_id in seen_books:
+    for bid in candidate_ids:
+        meta = db.get_book("gutenberg", bid)
+        if meta:
+            candidates_meta[bid] = meta
+    
+    unique_books = {}
+    query_norm = query.lower()
+    query_tokens = set(query_norm.split())
+    
+    for book_id, base_score, chunk_id in raw_results:
+        meta = candidates_meta.get(book_id)
+        if not meta:
             continue
-        seen_books.add(book_id)
-        results.append((book_id, score))
-        if len(results) >= top_k:
-            break
             
-    if not results:
+        title = meta.get("title") or "Unknown"
+        author = meta.get("author") or "Unknown"
+        
+        # Aggressive normalization (same as API)
+        title_norm = " ".join("".join(c for c in title.lower() if c.isalnum() or c.isspace()).split())
+        author_norm = " ".join("".join(c for c in author.lower() if c.isalnum() or c.isspace()).split())
+        dedupe_key = (title_norm, author_norm)
+        
+        final_score = base_score
+        
+        # Boost 1: Title Match
+        if query_norm in title.lower():
+            final_score *= 1.5
+            
+        # Boost 2: Author Match
+        author_tokens = set(author_norm.split())
+        if query_tokens & author_tokens:
+            final_score *= 2.0
+             
+        if dedupe_key not in unique_books or final_score > unique_books[dedupe_key][0]:
+            unique_books[dedupe_key] = (final_score, book_id)
+            
+    sorted_unique = sorted(unique_books.values(), key=lambda x: x[0], reverse=True)[:top_k]
+            
+    if not sorted_unique:
         print("   (No results found)")
         return
 
-    for i, (book_id, score) in enumerate(results, 1):
-        meta = db.get_book("gutenberg", book_id)
-        if meta:
-            title = meta.get("title", "Unknown")[:40] # Truncate for display
-            author = meta.get("author", "Unknown")[:20]
-        else:
-            title = "[Metadata Missing]"
-            author = "Unknown"
-            
+    for i, (score, book_id) in enumerate(sorted_unique, 1):
+        meta = candidates_meta[book_id]
+        title = meta.get("title", "Unknown")[:40]
+        author = meta.get("author", "Unknown")[:20]
         print(f"{i:<5} | {score:<8.4f} | {book_id:<8} | {author:<20} | {title}")
 
 

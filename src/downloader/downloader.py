@@ -90,6 +90,21 @@ class BookSeeder:
     def iter_all_books(self, limit: int | None = None) -> Iterator[dict]:
         yield from self.scraper.iter_book_metadata(limit=limit)
 
+
+    def _filter_books(self, batch: list[dict]) -> list[dict]:
+        """Skip Dictionaries, Encyclopedias, and other super-documents."""
+        STOP_WORDS = {
+            "dictionary", "encyclopedia", "thesaurus", "full text", 
+            "complete works", "webster's", "unabridged"
+        }
+        filtered = []
+        for meta in batch:
+            title = (meta.get("title") or "").lower()
+            if any(w in title for w in STOP_WORDS):
+                continue
+            filtered.append(meta)
+        return filtered
+
     def seed_all(self, limit: int | None = None, batch_size: int = 500) -> int:
         checkpoint_file = self.output_dir / ".checkpoint"
 
@@ -107,24 +122,33 @@ class BookSeeder:
             batch.append(meta)
 
             if len(batch) >= batch_size:
-                results = self._process_batch(batch)
+                filtered_batch = self._filter_books(batch)
+                results = self._process_batch(filtered_batch)
                 for bid, path, meta_res, fmt in results:
                     if path:
                         downloaded_ids.add(bid)
                         total += 1
                     self.db.upsert_book(meta_res)
+                
+                skipped_ids = {m['book_id'] for m in batch} - {m['book_id'] for m in filtered_batch}
+                downloaded_ids.update(skipped_ids)
 
                 checkpoint_file.write_text("\n".join(downloaded_ids))
-                print(f"Seeded {total} books")
+                print(f"Seeded {total} books (skipped {len(skipped_ids)} super-documents)")
                 batch = []
 
         if batch:
-            results = self._process_batch(batch)
+            filtered_batch = self._filter_books(batch)
+            results = self._process_batch(filtered_batch)
             for bid, path, meta_res, fmt in results:
                 if path:
                     downloaded_ids.add(bid)
                     total += 1
                 self.db.upsert_book(meta_res)
+            
+            skipped_ids = {m['book_id'] for m in batch} - {m['book_id'] for m in filtered_batch}
+            downloaded_ids.update(skipped_ids)
+            
             checkpoint_file.write_text("\n".join(downloaded_ids))
 
         return total

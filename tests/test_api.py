@@ -112,7 +112,7 @@ def test_search_returns_ranked_results(api_client):
     assert len(results) == 2
     assert results[0]["book_id"] == "2"
     assert results[0]["title"] == "Rust Guide"
-    assert results[0]["score"] == 0.95
+    assert results[0]["score"] == 0.95 * 1.5
     
     assert results[1]["book_id"] == "1"
     assert results[1]["title"] == "Python Guide"

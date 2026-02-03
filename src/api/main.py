@@ -87,24 +87,76 @@ async def search_books(query: str, limit: int = 10):
     
     raw_results = searcher.search(query, limit * 20)
     
-    book_scores: dict[str, tuple[float, int]] = {}
-    for book_id, score, chunk_id in raw_results:
-        if book_id not in book_scores or score > book_scores[book_id][0]:
-            book_scores[book_id] = (score, chunk_id)
+    candidate_ids = {r[0] for r in raw_results}
+    candidates_meta = {}
     
-    sorted_books = sorted(book_scores.items(), key=lambda x: x[1][0], reverse=True)[:limit]
+    for bid in candidate_ids:
+        meta = database.get_book("gutenberg", bid)
+        if meta:
+            candidates_meta[bid] = meta
+            
+    unique_books: dict[tuple[str, str], tuple[float, str]] = {}
+    
+    query_norm = query.lower()
+    query_tokens = set(query_norm.split())
+    
+    for book_id, base_score, chunk_id in raw_results:
+        meta = candidates_meta.get(book_id)
+        if not meta:
+            continue
+            
+        title = meta.get("title") or "Unknown"
+        author = meta.get("author") or "Unknown"
+        
+        # Aggressive normalization for deduplication
+        # Remove all punctuation and extra whitespace
+        title_norm = " ".join("".join(c for c in title.lower() if c.isalnum() or c.isspace()).split())
+        author_norm = " ".join("".join(c for c in author.lower() if c.isalnum() or c.isspace()).split())
+        dedupe_key = (title_norm, author_norm)
+        
+        final_score = base_score
+        
+        if query_norm in title.lower():
+            final_score *= 1.5
+            
+        # If any query token appears in author name, assume author search
+        author_tokens = set(author_norm.split())
+        if query_tokens & author_tokens:  # Intersection
+            final_score *= 2.0
+            
+        # Popularity from Open Library (1.0x - 2.0x)
+        ratings_avg = meta.get("ratings_average")
+        ratings_count = meta.get("ratings_count")
+        want_to_read = meta.get("want_to_read_count")
+        edition_count = meta.get("edition_count")
+        
+        if any([ratings_avg, want_to_read, edition_count]):
+            from src.enrichment.openlibrary import EnrichedMetadata
+            enriched = EnrichedMetadata(
+                ratings_average=ratings_avg,
+                ratings_count=ratings_count,
+                want_to_read_count=want_to_read,
+                edition_count=edition_count
+            )
+            final_score *= enriched.popularity_score()
+             
+        # Keep best version of this book
+        if dedupe_key not in unique_books or final_score > unique_books[dedupe_key][0]:
+            unique_books[dedupe_key] = (final_score, book_id)
+            
+    # Sort & Format
+    sorted_unique = sorted(unique_books.values(), key=lambda x: x[0], reverse=True)[:limit]
     
     results = []
-    for book_id, (score, chunk_id) in sorted_books:
-        meta = database.get_book("gutenberg", book_id)
-        if meta:
-            results.append(SearchResult(
-                book_id=book_id,
-                title=meta.get("title") or "Unknown",
-                author=meta.get("author") or "Unknown",
-                score=score,
-                url=f"https://www.gutenberg.org/ebooks/{book_id}"
-            ))
+    for score, book_id in sorted_unique:
+        meta = candidates_meta[book_id]
+        results.append(SearchResult(
+            book_id=book_id,
+            title=meta.get("title") or "Unknown",
+            author=meta.get("author") or "Unknown",
+            score=score,
+            url=f"https://www.gutenberg.org/ebooks/{book_id}"
+        ))
     
     return results
 
