@@ -382,11 +382,11 @@ class IndexStorage:
             if self.use_sqlite:
                 placeholders = ",".join("?" for _ in book_ids)
                 rows = conn.execute(
-                    f"SELECT book_id, title, author FROM books WHERE book_id IN ({placeholders})", book_ids
+                    f"SELECT book_id, title, author, ratings_average, ratings_count, want_to_read_count FROM books WHERE book_id IN ({placeholders})", book_ids
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT book_id, title, author FROM books WHERE book_id = ANY(%s)", (book_ids,)
+                    "SELECT book_id, title, author, ratings_average, ratings_count, want_to_read_count FROM books WHERE book_id = ANY(%s)", (book_ids,)
                 ).fetchall()
         
         from rust_bm25 import analyze
@@ -398,5 +398,8 @@ class IndexStorage:
                 "title": title,
                 "author": author,
                 "title_tokens": analyze(f"{title} {author}"),
+                "ratings_average": row.get("ratings_average"),
+                "ratings_count": row.get("ratings_count"),
+                "want_to_read_count": row.get("want_to_read_count"),
             }
         return result

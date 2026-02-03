@@ -47,7 +47,9 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Copy application code
 COPY src ./src
 COPY scripts ./scripts
-COPY app.py main.py README.md ./
+COPY alembic ./alembic
+COPY alembic.ini ./
+COPY app.py main.py README.md stopwords-iso.json ./
 
 # Run the API
 # We use 'uv run' but since PATH hits the venv first, 

@@ -1,13 +1,15 @@
 """
 Google-like ranking without ML.
-BM25 + editorial heuristics.
+BM25 + editorial heuristics using file-based index.
 """
+import json
 import math
+import os
 from collections import defaultdict
 from dataclasses import dataclass
-from functools import lru_cache
+from pathlib import Path
 
-from rust_bm25 import WandSearcher, analyze
+from rust_bm25 import FileSearcher, analyze
 from src.indexer.storage import IndexStorage
 from src.indexer.stopwords import load_stopwords
 
@@ -18,7 +20,6 @@ LENGTH_NORM = 1000
 SUM_TOP_N_WEIGHT = 0.2
 REFERENCE_PENALTY = 0.7
 STRONG_TITLE_BOOST = 1.3
-DF_THRESHOLD = 0.90  # Ignore terms appearing in >90% of docs
 PHRASE_BOOST = 1.2   # Boost when all query terms in same chunk
 
 REFERENCE_KEYWORDS = {"dictionary", "encyclopedia", "lexicon", "glossary", "index", "catalog", "thesaurus", "concordance"}
@@ -32,6 +33,7 @@ class ChunkResult:
     title: str
     author: str
     title_tokens: set[str]
+    meta: dict = None
 
 
 @dataclass  
@@ -48,34 +50,29 @@ class Ranker:
         self.storage = storage or IndexStorage()
         self.k1 = k1
         self.b = b
-        self._num_docs = 0
         self._avgdl = 1.0
         self._stopwords = load_stopwords()
-        self._searcher: WandSearcher | None = None
+        self._searcher: FileSearcher | None = None
+        self._index_dir = Path(os.getenv("INDEX_DIR", "data/index"))
         self._load_globals()
 
     def _load_globals(self):
-        n = self.storage.get_global("num_docs")
-        avgdl = self.storage.get_global("avgdl")
-        if n:
-            self._num_docs = int(n)
-        if avgdl:
-            self._avgdl = float(avgdl)
+        """Load avgdl from index.json for scoring adjustments."""
+        index_meta_path = self._index_dir / "index.json"
+        
+        if index_meta_path.exists():
+            try:
+                with open(index_meta_path) as f:
+                    meta = json.load(f)
+                self._avgdl = meta.get("avgdl", 1.0)
+            except (json.JSONDecodeError, IOError):
+                pass
 
-    def _get_searcher(self) -> WandSearcher:
+    def _get_searcher(self) -> FileSearcher:
         if self._searcher is None:
-            self._searcher = WandSearcher(self._num_docs, self._avgdl, self.k1, self.b)
+            self._searcher = FileSearcher(str(self._index_dir))
             self._searcher.set_stopwords(list(self._stopwords))
         return self._searcher
-
-    def _is_dynamic_stopword(self, df: int) -> bool:
-        """Term is too common (>90% of docs)."""
-        return self._num_docs > 0 and df / self._num_docs > DF_THRESHOLD
-
-    @lru_cache(maxsize=10000)
-    def _get_term_cached(self, term: str) -> tuple[int, bytes] | None:
-        """Cached posting list lookup."""
-        return self.storage.get_term(term)
 
     def search(self, query: str, top_k: int = 10) -> list[BookResult]:
         query_tokens = [t for t in analyze(query) if t not in self._stopwords]
@@ -84,55 +81,21 @@ class Ranker:
         
         query_set = set(query_tokens)
         
-        # 1. Get posting lists, filter dynamic stopwords
-        posting_data = []
-        common_terms_data = [] # Fallback if everything is filtered
-        filtered_terms = set()
-        
-        for token in query_set:
-            term_data = self._get_term_cached(token)
-            if term_data:
-                df, postings_blob = term_data
-                # Skip terms that appear in >DF_THRESHOLD of docs
-                if self._is_dynamic_stopword(df):
-                    filtered_terms.add(token)
-                    common_terms_data.append((df, postings_blob))
-                    continue
-                posting_data.append((df, postings_blob))
-        
-        # Fallback: if all terms were filtered (e.g. specialized corpus or very common terms), use them anyway
-        if not posting_data and common_terms_data:
-            posting_data = common_terms_data
-            filtered_terms.clear()
-
-        if not posting_data:
-            return []
-        
-        # Update query_set to exclude filtered terms for coverage calc
-        query_set -= filtered_terms
-        
-        # 2. WAND search (doc_lengths computed internally)
+        # 1. Use FileSearcher for BM25 search on file-based index
         searcher = self._get_searcher()
-        candidates = searcher.search("", posting_data, top_k * 20)
+        # Get more candidates for re-ranking (book_id, bm25_score, chunk_id)
+        candidates = searcher.search(query, top_k * 20)
         
         if not candidates:
             return []
         
-        # 3. Get chunk -> book mapping
-        chunk_ids = [doc_id for doc_id, _ in candidates]
-        chunk_books = self.storage.get_chunks_batch(chunk_ids)
-        
-        # 4. Get book metadata
-        book_ids = list(set(chunk_books.values()))
+        # 2. Get book metadata for all unique books
+        book_ids = list(set(book_id for book_id, _, _ in candidates))
         books_meta = self.storage.get_books_metadata(book_ids)
         
-        # 5. Score chunks with boosts
+        # 3. Score chunks with boosts
         chunk_results: list[ChunkResult] = []
-        for doc_id, bm25_score in candidates:
-            book_id = chunk_books.get(doc_id)
-            if not book_id:
-                continue
-            
+        for book_id, bm25_score, chunk_id in candidates:
             meta = books_meta.get(book_id, {})
             title = meta.get("title", "")
             author = meta.get("author", "")
@@ -153,14 +116,16 @@ class Ranker:
             score = (bm25_score + TITLE_BOOST * title_score) * coverage_mult * length_penalty * phrase_mult
             
             chunk_results.append(ChunkResult(
-                doc_id=doc_id,
+                doc_id=chunk_id,
                 book_id=book_id,
                 score=score,
                 title=title,
                 author=author,
-                title_tokens=title_tokens
+                title_tokens=title_tokens,
+                meta=meta
             ))
         
+        # 4. Aggregate chunks by book
         books: dict[str, list[ChunkResult]] = defaultdict(list)
         for cr in chunk_results:
             books[cr.book_id].append(cr)
@@ -183,6 +148,25 @@ class Ranker:
             if query_set and query_set <= best.title_tokens:
                 book_score *= STRONG_TITLE_BOOST
             
+            # --- Enrichment Boosts ---
+            meta = best.meta
+            ratings_average = meta.get("ratings_average")
+            want_to_read_count = meta.get("want_to_read_count")
+            
+            # 1. Rating Boost (up to 1.5x)
+            if ratings_average and ratings_average > 0:
+                # Boost = 1.0 + (rating / 5) * 0.5 -> 5.0 rating gives 1.5x
+                rating_mult = 1.0 + (float(ratings_average) / 5.0) * 0.5
+                book_score *= rating_mult
+
+            # 2. Popularity Boost (up to 1.2x)
+            if want_to_read_count and want_to_read_count > 0:
+                # Logarithmic boost
+                # 100 -> 1.05, 1000 -> 1.075, 10000 -> 1.1...
+                pop_mult = 1.0 + min(0.2, math.log10(max(1, want_to_read_count)) * 0.05)
+                book_score *= pop_mult
+            # -------------------------
+            
             book_results.append(BookResult(
                 book_id=book_id,
                 score=book_score,
@@ -193,6 +177,7 @@ class Ranker:
         
         book_results.sort(key=lambda x: x.score, reverse=True)
         
+        # 5. Author diversity penalty
         author_counts: dict[str, int] = defaultdict(int)
         for br in book_results:
             n = author_counts[br.author]

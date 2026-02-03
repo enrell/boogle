@@ -67,7 +67,7 @@ Get started immediately without any external database services.
    ```
    > 📄 API Documentation available at: `http://127.0.0.1:8000/docs`
 
-### Option 2: PostgreSQL (Production)
+### Option 2: PostgreSQL (Local Development)
 Recommended for larger datasets and better concurrency.
 
 1. **Start the Database:**
@@ -89,6 +89,44 @@ Recommended for larger datasets and better concurrency.
    ```bash
    uv run boogle api
    ```
+
+### Option 3: Docker Compose (Full Stack)
+Run the complete stack in containers — ideal for deployment or testing without local dependencies.
+
+1. **Build and Start All Services:**
+   ```bash
+   docker compose up -d
+   ```
+   This starts PostgreSQL, runs migrations, and launches the API server.
+
+2. **Run Migrations (one-time):**
+   ```bash
+   docker compose run --rm migrate
+   ```
+
+3. **Index Books:**
+   ```bash
+   docker compose run --rm index uv run boogle index --limit 1000
+   ```
+
+4. **Test the API:**
+   ```bash
+   curl http://localhost:8000/health
+   curl "http://localhost:8000/search?query=liberty&limit=5"
+   ```
+
+5. **View Logs:**
+   ```bash
+   docker compose logs -f api
+   ```
+
+6. **Stop Everything:**
+   ```bash
+   docker compose down        # Keep data
+   docker compose down -v     # Remove data volumes
+   ```
+
+> **Note:** The API is available at `http://localhost:8000` and Adminer (DB UI) at `http://localhost:8080`.
 
 ---
 

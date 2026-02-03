@@ -56,6 +56,9 @@ class DatabaseManager:
             
         url = os.getenv("DATABASE_URL")
         if url:
+            # Ensure psycopg driver is used
+            if url.startswith("postgresql://"):
+                url = url.replace("postgresql://", "postgresql+psycopg://", 1)
             return url
             
         user = os.getenv("POSTGRES_USER", "boogle")
@@ -63,7 +66,8 @@ class DatabaseManager:
         host = os.getenv("POSTGRES_HOST", "localhost")
         port = os.getenv("POSTGRES_PORT", "5432")
         database = os.getenv("POSTGRES_DB", "boogle")
-        return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+        # Use psycopg (v3) driver explicitly
+        return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}"
 
     @contextmanager
     def get_session(self) -> Iterator[Session]:

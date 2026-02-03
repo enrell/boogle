@@ -32,14 +32,17 @@ def get_url():
     else:
         db_url = os.getenv("DATABASE_URL")
         if db_url:
+            # Ensure psycopg driver is used
+            if db_url.startswith("postgresql://"):
+                db_url = db_url.replace("postgresql://", "postgresql+psycopg://", 1)
             return db_url
-        # Build from components
+        # Build from components - use psycopg (v3) driver
         user = os.getenv("POSTGRES_USER", "boogle")
         password = os.getenv("POSTGRES_PASSWORD", "boogle")
         host = os.getenv("POSTGRES_HOST", "localhost")
         port = os.getenv("POSTGRES_PORT", "5432")
         db = os.getenv("POSTGRES_DB", "boogle")
-        return f"postgresql://{user}:{password}@{host}:{port}/{db}"
+        return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{db}"
 
 
 def run_migrations_offline() -> None:

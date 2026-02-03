@@ -21,6 +21,18 @@ services:
     ports:
       - 8080:8080
 
+  migrate:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_USER: boogle
+      POSTGRES_PASSWORD: boogle
+      POSTGRES_DB: boogle
+    command: ["uv", "run", "alembic", "upgrade", "head"]
+
   index:
     build: .
     depends_on:
@@ -32,7 +44,7 @@ services:
       POSTGRES_PASSWORD: boogle
       POSTGRES_DB: boogle
     volumes:
-      - ./data:/app/data
+      - boogle_data:/app/data
     command: ["uv", "run", "boogle", "index"]
 
   api:
@@ -48,8 +60,9 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./data:/app/data
+      - boogle_data:/app/data
     command: ["uv", "run", "boogle", "api"]
 
 volumes:
   pgdata:
+  boogle_data:

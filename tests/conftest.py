@@ -3,6 +3,9 @@ import shutil
 import pytest
 from pathlib import Path
 
+def pytest_addoption(parser):
+    parser.addoption("--sqlite", action="store_true", default=False, help="Use temporary SQLite database instead of Postgres")
+
 @pytest.fixture(scope="session")
 def test_dirs():
     """Setup temporary directories for file storage and index."""
@@ -32,9 +35,9 @@ def test_dirs():
         shutil.rmtree(base)
 
 @pytest.fixture(scope="session")
-def test_db_env(test_dirs):
+def test_db_env(test_dirs, request):
     """Override environment variables to use test database and directories."""
-    db_path = os.path.join(test_dirs["base"], "test.db")
+    use_sqlite = request.config.getoption("--sqlite")
     
     # Store original env vars
     original_env = {
@@ -45,11 +48,20 @@ def test_db_env(test_dirs):
     }
     
     # Set test env vars
-    os.environ["USE_SQLITE"] = "1"
-    os.environ["SQLITE_DB_PATH"] = db_path
     os.environ["BOOKS_DIR"] = test_dirs["books"]
     os.environ["INDEX_DIR"] = test_dirs["index"]
     os.environ["CHUNKS_DIR"] = test_dirs["chunks"]
+    
+    if use_sqlite:
+        db_path = os.path.join(test_dirs["base"], "test.db")
+        os.environ["USE_SQLITE"] = "1"
+        os.environ["SQLITE_DB_PATH"] = db_path
+    else:
+        # Assume Postgres is available (e.g. from Docker)
+        # We might want to set a test specific DB name if possible, 
+        # but for now we trust the default env or docker compose Setup.
+        if "USE_SQLITE" in os.environ:
+             del os.environ["USE_SQLITE"]
     
     yield
     
