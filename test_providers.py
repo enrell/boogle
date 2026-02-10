@@ -146,30 +146,36 @@ def test_openlibrary_provider():
         return False
 
 
-def test_bndigital_provider():
-    """Test Brazilian Digital Library provider."""
+def test_pportal_provider():
+    """Test PPORTAL provider."""
     print("\n" + "=" * 60)
-    print("Testing BNDigital Provider")
+    print("Testing PPORTAL Provider")
     print("=" * 60)
 
     try:
         from src.providers.registry import ProviderRegistry
 
-        provider = ProviderRegistry.get("bndigital")
+        provider = ProviderRegistry.get("pportal")
         print(f"✓ Got provider: {provider.source_name}")
         print(f"✓ Supports downloads: {provider.supports_downloads()}")
         print(f"✓ Enabled by default: {provider.enabled_by_default}")
 
+        # Show dataset info
+        print("\nDataset information:")
+        info = provider.get_dataset_info()
+        print(f"  Total works: {info['total_works']}")
+        print(f"  Cache dir: {info['cache_dir']}")
+
         # Test search (Portuguese term)
-        print("\nTesting search API (query: 'Brasil')...")
-        results = provider.search_books("Brasil", limit=3)
+        print("\nTesting search API (query: 'Machado')...")
+        results = provider.search_books("Machado", limit=3)
 
         if results:
             print(f"✓ Found {len(results)} results")
             for i, book in enumerate(results[:2], 1):
                 print(f"  {i}. {book.get('title', 'N/A')}")
         else:
-            print("⚠ No search results (may be website change)")
+            print("⚠ No search results (dataset may need download)")
 
         # Test iterator (first item only)
         print("\nTesting iterator (first book only)...")
@@ -177,9 +183,11 @@ def test_bndigital_provider():
             print(f"✓ Got book: {book.get('title', 'N/A')}")
             if book.get("author"):
                 print(f"  Author: {book['author']}")
+            if book.get("category"):
+                print(f"  Category: {book['category'][:60]}...")
             break
         else:
-            print("⚠ No books returned (may be website change)")
+            print("⚠ No books returned (may need to download dataset first)")
 
         return True
 
