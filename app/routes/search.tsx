@@ -106,8 +106,8 @@ export default function Search() {
 
       <div className="flex flex-1 relative overflow-hidden">
         {/* Main Results Area */}
-        <main className={`flex-1 overflow-y-auto px-4 py-6 md:pl-44 transition-all duration-300 ${isPanelOpen ? 'pr-[450px]' : ''}`}>
-          <div className="max-w-2xl w-full">
+        <main className={`flex-1 overflow-y-auto px-4 py-6 md:px-8 transition-all duration-300 ${isPanelOpen ? 'md:pr-[450px]' : ''}`}>
+          <div className="max-w-7xl w-full">
             {error && (
               <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
                 <p className="text-red-700 font-medium">{error}</p>
@@ -127,29 +127,41 @@ export default function Search() {
               </div>
             )}
 
-            <div className="space-y-8 pb-10">
-              {results.map((book) => (
-                <article key={book.book_id} className="group">
-                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-1">
-                    <div className="flex flex-col">
-                      <span className="text-xs text-gray-900 dark:text-gray-200 font-medium line-clamp-1">{book.title || "Untitled"}</span>
-                      <span className="text-xs text-gray-500 dark:text-gray-500 line-clamp-1">{book.url}</span>
-                    </div>
-                  </div>
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-10">
+          {results.map((book) => (
+            <article
+              key={book.book_id}
+              className="group bg-white dark:bg-boogle-dark-lighter border border-gray-200 dark:border-white/10 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 overflow-hidden cursor-pointer"
+              onClick={(e) => handleBookClick(e as any, book.book_id)}
+            >
+              <div className="p-5">
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-3 line-clamp-2 min-h-[3.5rem]">
+                  {book.title || "Untitled"}
+                </h3>
+                <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                  <span className="text-xs bg-gray-100 dark:bg-white/10 px-2 py-1 rounded-full">
+                    {t('by')}
+                  </span>
+                  <span className="text-sm font-medium text-gray-800 dark:text-gray-200 line-clamp-1">
+                    {book.author || t('unknown_author')}
+                  </span>
+                </div>
+                <div className="mt-3 pt-3 border-t border-gray-100 dark:border-white/5">
                   <a
                     href={`/book/${book.book_id}`}
                     onClick={(e) => handleBookClick(e, book.book_id)}
-                    className="text-xl text-blue-600 dark:text-blue-400 hover:underline visited:text-purple-700 dark:visited:text-purple-400 font-medium block mb-1 cursor-pointer"
+                    className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium inline-flex items-center gap-1"
                   >
-                    {book.title || "Untitled"}
+                    {t('view_details') || 'View Details'}
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
                   </a>
-                  <p className="text-sm text-gray-700 dark:text-gray-300 line-clamp-2">
-                    <span className="text-gray-500">{t('by')}</span>{" "}
-                    <span className="font-medium">{book.author || t('unknown_author')}</span>
-                  </p>
-                </article>
-              ))}
-            </div>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
 
             {/* Pagination Controls */}
             {results.length > 0 && (
