@@ -11,8 +11,18 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple
 
-import requests
-from bs4 import BeautifulSoup
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
+    requests = None
+try:
+    from bs4 import BeautifulSoup
+    BS4_AVAILABLE = True
+except ImportError:
+    BS4_AVAILABLE = False
+    BeautifulSoup = None
 
 from src.providers.base import BaseBookProvider
 from src.providers.registry import register_provider
