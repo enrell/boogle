@@ -306,6 +306,149 @@ uv run boogle index --light-mode --sqlite
 
 ---
 
+## 🔌 Book Providers
+
+Boogle supports multiple book providers through a pluggable architecture. Adding a new provider is as simple as creating a single Python file.
+
+### Available Providers
+
+| Provider | Description | Downloads | Default |
+|----------|-------------|-----------|---------|
+| **gutenberg** | Project Gutenberg | ✅ Yes | ✅ Enabled |
+| **openlibrary** | Open Library metadata | ❌ No | ❌ Disabled |
+| **bndigital** | Brazilian National Library | ❌ No | ❌ Disabled |
+
+### Enabling Providers
+
+Providers can be enabled via environment variables:
+
+```bash
+# Enable Open Library
+export BOOGLE_PROVIDER_OPENLIBRARY_ENABLED=1
+
+# Enable BNDigital
+export BOOGLE_PROVIDER_BNDIGITAL_ENABLED=1
+
+# Disable Gutenberg (if you only want other providers)
+export BOOGLE_PROVIDER_GUTENBERG_ENABLED=0
+
+# Run with specific providers
+BOOGLE_PROVIDER_OPENLIBRARY_ENABLED=1 uv run boogle index --sqlite
+```
+
+### Using Providers
+
+**Index from specific providers:**
+
+```bash
+# Index only from Open Library
+uv run boogle index --sqlite --providers openlibrary
+
+# Index from multiple providers
+uv run boogle index --sqlite --providers gutenberg,openlibrary
+
+# Index from all enabled providers (default)
+uv run boogle index --sqlite
+```
+
+**Search with provider filter:**
+
+```bash
+# Search across all providers (default)
+uv run boogle search "shakespeare" --sqlite
+
+# Search only in specific provider
+uv run boogle search "machado de assis" --sqlite --source bndigital
+```
+
+### Creating a New Provider
+
+Adding a new provider takes just 3 steps:
+
+1. **Create a provider file** (`src/providers/myprovider.py`):
+
+```python
+from src.providers.base import BaseBookProvider
+from src.providers.registry import register_provider
+
+@register_provider
+class MyProvider(BaseBookProvider):
+    @property
+    def source_name(self) -> str:
+        return "myprovider"
+    
+    def iter_book_metadata(self, limit=None):
+        # Yield book metadata dicts
+        for book in my_book_source:
+            yield {
+                'source': self.source_name,
+                'book_id': str(book['id']),
+                'title': book['title'],
+                'author': book['author'],
+                'url': self.get_book_url(book['id']),
+            }
+    
+    def extract_metadata(self, book_id: str):
+        # Fetch single book metadata
+        book = fetch_book(book_id)
+        return {
+            'source': self.source_name,
+            'book_id': book_id,
+            'title': book['title'],
+            'author': book['author'],
+            'url': self.get_book_url(book_id),
+        }
+    
+    def get_book_url(self, book_id: str) -> str:
+        return f"https://mysite.com/book/{book_id}"
+```
+
+2. **Enable your provider**:
+
+```bash
+export BOOGLE_PROVIDER_MYPROVIDER_ENABLED=1
+```
+
+3. **Use it**:
+
+```bash
+uv run boogle index --providers myprovider --sqlite
+```
+
+That's it! Your provider is automatically discovered and integrated with all Boogle phases (seeding, indexing, search, API).
+
+### Provider Requirements
+
+**Minimal implementation** (3 required methods):
+- `source_name` - Unique provider identifier
+- `iter_book_metadata()` - Stream all books
+- `extract_metadata()` - Fetch single book
+
+**Optional features**:
+- `download_book()` - Full text downloads
+- `search_books()` - Provider-specific search
+- `filter_book()` - Custom filtering logic
+- `get_cover_url()` - Cover images
+
+See `src/providers/example.py` for a complete template with documentation.
+
+### Testing Providers
+
+Run the provider test suite:
+
+```bash
+# Test all providers
+python test_providers.py
+
+# Test specific provider
+python test_providers.py --test-openlibrary
+
+# Skip network tests
+python test_providers.py --skip-network
+```
+
+---
+
 ## 🪪 License
 
 This project is open-source under the **MIT License**.
