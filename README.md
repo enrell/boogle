@@ -137,8 +137,8 @@ Boogle exposes two main CLI tools: `boogle` (APP) and `boogle-db` (DB Ops).
 ### `boogle` - Application Pipeline
 | Command | Description | Flags |
 |---------|-------------|-------|
-| `index` | Downloads books and builds the BM25 index | `--limit N` `--sqlite` `--workers N` `--reindex` |
-| `search` | Performs a search query via CLI | `query` `--top-k N` `--sqlite` |
+| `index` | Downloads books and builds the BM25 index | `--limit N` `--sqlite` `--workers N` `--reindex` `--light-mode` `--enrich` |
+| `search` | Performs a search query via CLI | `query` `--top-k N` `--sqlite` `--light-mode` |
 | `api` | Starts the FastAPI server | `--port N` `--host 0.0.0.0` `--sqlite` |
 
 ### `boogle-db` - Database Management (Postgres)
@@ -226,6 +226,83 @@ curl http://localhost:8000/health
 - Documents added via `/documents` are immediately searchable
 - The WAL ensures documents survive server restarts
 - Call `/documents/flush` after persisting documents to disk via batch indexing
+
+---
+
+## 💡 Light Mode
+
+Boogle supports **Light Mode** for scenarios where you want to index and search book metadata (title, author, subjects, language) without downloading full text content. This reduces storage by ~100x and enables rapid indexing of large catalogs.
+
+### When to Use Light Mode
+
+- **Discovery/Browsing**: When you want to find books by title, author, or subject
+- **Large Catalogs**: Index tens of thousands of books quickly without storing GBs of text
+- **Limited Storage**: Run on resource-constrained environments
+- **Metadata Research**: Analyze book metadata without content
+
+### Comparison
+
+| Feature | Full Mode | Light Mode |
+|---------|-----------|------------|
+| Storage per book | ~1-5 MB | ~10 KB |
+| Index time (1000 books) | ~30 min | ~2 min |
+| Searchable content | Full text | Metadata only |
+| Search types | Any text | Title, Author, Subjects |
+| Snippets | Yes | No |
+| Use case | Deep reading | Discovery, browsing |
+
+### Usage
+
+**CLI - Index in Light Mode:**
+```bash
+uv run boogle index --light-mode --limit 1000 --sqlite
+```
+
+**CLI - Search in Light Mode:**
+```bash
+uv run boogle search "shakespeare tragedy" --light-mode --sqlite
+```
+
+**API Server - Light Mode:**
+```bash
+LIGHT_MODE=1 uv run boogle api --sqlite
+```
+
+The `/search` endpoint will automatically use the metadata-only index.
+
+**Check mode:**
+```bash
+curl http://localhost:8000/health
+# Returns: {"status": "healthy", "mode": "light"}
+```
+
+### How It Works
+
+1. **Metadata-only seeding**: Downloads only book metadata from Gutenberg catalog (no file downloads)
+2. **Metadata indexing**: Creates a lightweight BM25 index on title, author, subjects, and language
+3. **BM25 scoring**: Uses standard BM25 ranking with term frequency weighting
+4. **Field boosting**: Title matches are boosted 3x, subjects 2x for relevance
+
+### Storage Layout
+
+- **Light mode index**: `data/index_metadata/`
+- **Light mode checkpoints**: `data/books/.checkpoint_light`
+- **Full mode index**: `data/index/`
+- **Full mode checkpoints**: `data/books/.checkpoint`
+
+### Migration Between Modes
+
+You can run both modes on the same database:
+
+```bash
+# First, seed metadata in light mode
+uv run boogle index --light-mode --sqlite
+
+# Later, download full text for specific books
+# (Re-run without --light-mode for books you want to read)
+```
+
+**Note**: Light mode and full mode use separate checkpoints and indexes. They do not interfere with each other.
 
 ---
 
