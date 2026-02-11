@@ -341,10 +341,11 @@ fn index_corpus_internal(
 fn collect_book_files(books_dir: &str) -> Vec<String> {
     use glob::glob;
 
+    // Recursively search subdirectories for book files
     let patterns = [
-        format!("{}/*.epub", books_dir),
-        format!("{}/*.txt", books_dir),
-        format!("{}/*.pdf", books_dir),
+        format!("{}/**/*.epub", books_dir),
+        format!("{}/**/*.txt", books_dir),
+        format!("{}/**/*.pdf", books_dir),
     ];
 
     let mut files = Vec::new();
