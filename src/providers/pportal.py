@@ -14,7 +14,7 @@ Paper: https://sol.sbc.org.br/index.php/dsw/article/view/17416
 """
 
 import csv
-import os
+import re
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional
 import zipfile
@@ -42,7 +42,7 @@ class PPORTALProvider(BaseBookProvider):
     Features:
     - 82,313+ public domain works (from Domínio Público)
     - Portuguese language literature
-    - Metadata from multiple sources
+    - Direct download links to PDFs
 
     The dataset is downloaded once from Zenodo and cached locally.
 
@@ -50,17 +50,11 @@ class PPORTALProvider(BaseBookProvider):
         provider = PPORTALProvider()
         for meta in provider.iter_book_metadata(limit=100):
             print(f"{meta['title']} by {meta['author']}")
+            print(f"Download: {meta['url']}")
     """
 
-    # Zenodo dataset URL
     ZENODO_URL = "https://zenodo.org/record/5178063/files/PPORTAL.zip"
     DATASET_CACHE_DIR = "data/pportal"
-
-    # CSV files in the dataset (in order of preference)
-    WORKS_CSV_OPTIONS = [
-        "digital_library_dominio.csv",  # Best source with metadata
-        "digital_library_preliminary.csv",
-    ]
 
     def __init__(self, cache_dir: str = None):
         self.cache_dir = Path(cache_dir or self.DATASET_CACHE_DIR)
@@ -74,164 +68,147 @@ class PPORTALProvider(BaseBookProvider):
 
     @property
     def enabled_by_default(self) -> bool:
-        """Enabled by default but requires initial download."""
         return True
 
     @property
     def session(self):
-        """Lazy session initialization."""
         if self._session is None:
             if not REQUESTS_AVAILABLE:
                 raise ImportError(
-                    "PPORTAL provider requires 'requests'. "
-                    "Install with: pip install requests"
+                    "PPORTAL requires 'requests'. Install: pip install requests"
                 )
             self._session = requests.Session()
-            self._session.headers.update(
-                {"User-Agent": "BoogleSearch/1.0 (boogle@example.com)"}
-            )
+            self._session.headers.update({"User-Agent": "BoogleSearch/1.0"})
         return self._session
 
     def _download_dataset(self) -> bool:
-        """Download and extract the PPORTAL dataset from Zenodo."""
+        """Download and extract dataset from Zenodo."""
         zip_path = self.cache_dir / "PPORTAL.zip"
 
-        # Check if already extracted
-        for csv_option in self.WORKS_CSV_OPTIONS:
-            works_file = self.cache_dir / csv_option
-            if works_file.exists():
-                print(f"PPORTAL dataset already cached at {works_file}")
-                return True
+        if (self.cache_dir / "digital_library_dominio.csv").exists():
+            return True
 
         print(f"Downloading PPORTAL dataset from Zenodo...")
-        print(f"URL: {self.ZENODO_URL}")
-        print(f"This may take a moment (8 MB)...")
-
         try:
             response = self.session.get(self.ZENODO_URL, stream=True, timeout=120)
             response.raise_for_status()
 
-            total_size = int(response.headers.get("content-length", 0))
-            downloaded = 0
-            chunk_size = 8192
-
             with open(zip_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=chunk_size):
+                for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
                         f.write(chunk)
-                        downloaded += len(chunk)
-                        if total_size > 0 and downloaded % (1024 * 1024) == 0:
-                            print(
-                                f"  Downloaded {downloaded / 1024 / 1024:.1f} MB / {total_size / 1024 / 1024:.1f} MB"
-                            )
 
-            print(f"  Downloaded to {zip_path}")
-
-            # Extract
-            print(f"Extracting...")
             with zipfile.ZipFile(zip_path, "r") as zip_ref:
                 zip_ref.extractall(self.cache_dir)
 
-            print(f"  Extracted to {self.cache_dir}")
-
-            # Remove zip file to save space
             zip_path.unlink()
             print(f"  Dataset ready!")
-
             return True
 
         except Exception as e:
-            print(f"Error downloading PPORTAL dataset: {e}")
+            print(f"Error: {e}")
             if zip_path.exists():
                 zip_path.unlink()
             return False
 
+    def _load_csv(self, filename: str, delimiter: str = "\t") -> List[Dict]:
+        """Load a CSV file."""
+        filepath = self.cache_dir / filename
+        if not filepath.exists():
+            return []
+
+        works = []
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+            reader = csv.DictReader(f, delimiter=delimiter)
+            for row in reader:
+                works.append(dict(row))
+        return works
+
     def _load_works_data(self) -> List[Dict]:
-        """Load works data from CSV."""
+        """Load and merge works data from multiple CSVs."""
         if self._works_data is not None:
             return self._works_data
 
-        # Ensure dataset is downloaded
         if not self._download_dataset():
             return []
 
-        # Find the first available CSV file
-        works_file = None
-        for csv_option in self.WORKS_CSV_OPTIONS:
-            candidate = self.cache_dir / csv_option
-            if candidate.exists():
-                works_file = candidate
-                break
+        # Load metadata CSV (has titles, authors, format)
+        metadata = self._load_csv("digital_library_dominio.csv", delimiter="\t")
+        print(f"  Loaded {len(metadata)} works from dominio.csv")
 
-        if not works_file:
-            print(f"Warning: Could not find works CSV in {self.cache_dir}")
-            print(f"Available files: {list(self.cache_dir.glob('*.csv'))}")
-            return []
+        # Load links CSV (has download links)
+        links = self._load_csv("digital_library_preliminary.csv", delimiter="\t")
+        print(f"  Loaded {len(links)} works from preliminary.csv")
 
-        print(f"Loading PPORTAL works from {works_file}...")
+        # Create lookup for download links by ID
+        link_map = {}
+        for row in links:
+            work_id = row.get("original_id", "")
+            download_link = row.get("download_link", "")
+            if work_id and download_link:
+                link_map[work_id] = download_link
 
-        try:
-            works = []
-            with open(works_file, "r", encoding="utf-8", errors="replace") as f:
-                # Detect delimiter - try tab first (most common in this dataset)
-                sample = f.read(1024)
-                f.seek(0)
+        # Merge: add download links to metadata
+        merged = []
+        for row in metadata:
+            work_id = row.get("original_id", "")
+            if work_id in link_map:
+                row["download_link"] = link_map[work_id]
+            merged.append(row)
 
-                delimiter = "\t"  # Default to tab
-                if "|" in sample and sample.count("|") > sample.count("\t"):
-                    delimiter = "|"
-                elif "," in sample and sample.count(",") > sample.count("\t"):
-                    delimiter = ","
+        print(f"  Merged {len(merged)} works with metadata and links")
+        self._works_data = merged
+        return merged
 
-                reader = csv.DictReader(f, delimiter=delimiter)
-                for row in reader:
-                    works.append(dict(row))
-
-            print(f"  Loaded {len(works)} works")
-            self._works_data = works
-            return works
-
-        except Exception as e:
-            print(f"Error loading PPORTAL data: {e}")
-            return []
+    def _extract_obra_id(self, download_link: str) -> Optional[str]:
+        """Extract co_obra ID from Domínio Público URL."""
+        if not download_link:
+            return None
+        match = re.search(r"co_obra=(\d+)", download_link)
+        if match:
+            return match.group(1)
+        return None
 
     def _parse_work_row(self, row: Dict) -> Optional[Dict]:
-        """Parse a work row from CSV into standardized metadata."""
-        # Handle different CSV formats
-        work_id = row.get("original_id") or row.get("id")
-        title = row.get("work_title") or row.get("title")
-        author = row.get("work_authors") or row.get("author") or row.get("work_authors")
+        """Parse a work row into standardized metadata."""
+        title = row.get("work_title", "")
+        author = row.get("work_authors", "")
 
-        if not work_id or not title:
+        if not title:
             return None
 
-        # Clean up title and author
-        title = title.strip()
-        author = author.strip() if author else None
-
-        # Get other metadata
-        file_format = row.get("file_format", "")
-        file_size = row.get("file_size", "")
-        access_count = row.get("number_of_access", "")
-        original_source = row.get("original_source", "")
+        # Get download link
         download_link = row.get("download_link", "")
 
-        # Build metadata
-        meta = {
+        # Extract actual book ID from download link (co_obra parameter)
+        obra_id = self._extract_obra_id(download_link)
+        if obra_id:
+            work_id = obra_id
+        else:
+            # Fallback to original_id
+            work_id = row.get("original_id", "")
+
+        # Build files list if download link available
+        files = []
+        if download_link:
+            file_format = row.get("file_format", ".pdf")
+            files.append({"format": file_format.replace(".", ""), "url": download_link})
+
+        return {
             "source": self.source_name,
             "book_id": str(work_id),
-            "title": title,
-            "author": author,
-            "language": "pt",  # Portuguese
-            "category": original_source if original_source else None,
+            "title": title.strip(),
+            "author": author.strip() if author else None,
+            "language": "pt",
+            "category": row.get("original_source", ""),
             "copyright_status": "Public Domain",
             "url": download_link if download_link else self.get_book_url(str(work_id)),
-            "files": [],
-            "format": file_format if file_format else None,
-            "file_size": file_size if file_size else None,
+            "files": files,
+            "format": row.get("file_format", "").replace(".", "")
+            if row.get("file_format")
+            else None,
+            "file_size": row.get("file_size", ""),
         }
-
-        return meta
 
     def iter_book_metadata(self, limit: Optional[int] = None) -> Iterator[Dict]:
         """Stream book metadata from PPORTAL dataset."""
@@ -251,23 +228,25 @@ class PPORTALProvider(BaseBookProvider):
                 yield meta
                 count += 1
 
-        if count > 0:
-            print(f"Iterated {count} works from PPORTAL")
-
     def extract_metadata(self, book_id: str) -> Dict[str, object]:
         """Extract metadata for a single work by ID."""
         works = self._load_works_data()
 
-        # Find work by ID
         for row in works:
-            work_id = row.get("original_id") or row.get("id")
-            if str(work_id) == str(book_id):
+            # Check if book_id matches obra_id from download link
+            download_link = row.get("download_link", "")
+            obra_id = self._extract_obra_id(download_link)
+
+            if obra_id and str(obra_id) == str(book_id):
                 meta = self._parse_work_row(row)
                 if meta:
                     return meta
-                break
+            # Also check original_id as fallback
+            elif str(row.get("original_id", "")) == str(book_id):
+                meta = self._parse_work_row(row)
+                if meta:
+                    return meta
 
-        # Return minimal metadata if not found
         return {
             "source": self.source_name,
             "book_id": str(book_id),
@@ -280,11 +259,47 @@ class PPORTALProvider(BaseBookProvider):
 
     def get_book_url(self, book_id: str) -> str:
         """Get URL for the work."""
-        return f"https://zenodo.org/record/5178063"
+        return f"http://www.dominiopublico.gov.br/pesquisa/DetalheObraForm.do?select_action=&co_obra={book_id}"
 
     def supports_downloads(self) -> bool:
-        """PPORTAL provides metadata only, not full text."""
-        return False
+        """PPORTAL provides download links."""
+        return True
+
+    def download_book(
+        self, book_id: str, output_dir: Path, metadata: Optional[Dict] = None
+    ) -> Optional[Path]:
+        """
+        Download book from Domínio Público.
+
+        Note: Domínio Público requires session cookies, so direct download
+        may not work. Returns the URL for manual download.
+        """
+        meta = metadata or self.extract_metadata(book_id)
+        files = meta.get("files", [])
+
+        if not files:
+            print(f"No download link available for book {book_id}")
+            return None
+
+        download_url = files[0]["url"]
+        print(f"Download URL for {book_id}: {download_url}")
+        print(
+            f"Note: Domínio Público requires browser session. Download manually from the URL above."
+        )
+
+        # Try to download anyway
+        try:
+            response = self.session.get(download_url, timeout=30, allow_redirects=True)
+            if response.status_code == 200 and len(response.content) > 1000:
+                ext = files[0].get("format", "pdf")
+                filepath = output_dir / f"{book_id}.{ext}"
+                filepath.write_bytes(response.content)
+                print(f"  Downloaded to {filepath}")
+                return filepath
+        except Exception as e:
+            print(f"  Download failed: {e}")
+
+        return None
 
     def filter_book(self, metadata: Dict) -> bool:
         """Filter out invalid entries."""
@@ -308,18 +323,18 @@ class PPORTALProvider(BaseBookProvider):
             if len(results) >= limit:
                 break
 
-            title = (row.get("work_title") or row.get("title") or "").lower()
-            author = (row.get("work_authors") or row.get("author") or "").lower()
+            title = (row.get("work_title") or "").lower()
+            author = (row.get("work_authors") or "").lower()
 
             if query_lower in title or query_lower in author:
-                work_id = row.get("original_id") or row.get("id")
+                work_id = row.get("original_id", "")
                 download_link = row.get("download_link", "")
                 results.append(
                     {
                         "source": self.source_name,
                         "book_id": str(work_id),
-                        "title": row.get("work_title") or row.get("title"),
-                        "author": row.get("work_authors") or row.get("author"),
+                        "title": row.get("work_title"),
+                        "author": row.get("work_authors"),
                         "url": download_link
                         if download_link
                         else self.get_book_url(str(work_id)),
@@ -332,8 +347,12 @@ class PPORTALProvider(BaseBookProvider):
         """Get information about the loaded dataset."""
         works = self._load_works_data()
 
+        # Count how many have download links
+        with_links = sum(1 for w in works if w.get("download_link"))
+
         return {
             "total_works": len(works),
+            "works_with_download_links": with_links,
             "cache_dir": str(self.cache_dir),
             "dataset_url": self.ZENODO_URL,
         }
