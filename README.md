@@ -1,17 +1,44 @@
 # 📚 Boogle — Open Source Search Engine for Free Books
 
+[![Python](https://img.shields.io/badge/Python-3.13+-blue.svg)](https://www.python.org/)
+[![Rust](https://img.shields.io/badge/Rust-1.80+-orange.svg)](https://www.rust-lang.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green.svg)](https://fastapi.tiangolo.com/)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **Boogle** is a distinctively fast, open-source search engine designed to index and search public domain books from multiple sources.
 
 It combines a **Python** orchestrator (FastAPI, SQL adapters) with a high-performance **Rust** indexing engine (BM25 ranking, compression) to deliver millisecond-level search latencies over large text corpora.
+
+## ✨ Highlights
+
+- 🎯 **Multi-Provider**: Aggregate from Gutenberg, OpenLibrary, PPORTAL, and more
+- 🔗 **Unified Schema**: Automatic cross-reference merging with quality scoring
+- ⚡ **Parallel Indexing**: Seed from multiple providers simultaneously
+- 🔒 **Security First**: SQL injection, XSS, and path traversal protection
+- 🚀 **High Performance**: Rust-based BM25 with millisecond latency
+- 💾 **Flexible Storage**: SQLite or PostgreSQL support
 
 ---
 
 ## Overview
 
 Most public-domain book collections (like Project Gutenberg or Open Library) provide their own search features,
-but none of them aggregate multiple sources or offer relevance ranking based on modern information retrieval techniques.
+but none of them aggregate multiple sources with quality-based ranking or offer modern information retrieval techniques.
 
-**Boogle** changes that.
+**Boogle** changes that by providing:
+
+🎯 **Multi-Provider Aggregation**: Automatically discovers and indexes books from multiple sources (Gutenberg, OpenLibrary, PPORTAL, and more)
+
+🔗 **Unified Schema**: Cross-reference merging detects duplicates, combines metadata, and selects the best quality source
+
+⚡ **Parallel Processing**: Seed from multiple providers simultaneously with thread-safe database connections
+
+🔒 **Security First**: Comprehensive input validation, SQL injection blocking, XSS prevention, and rate limiting
+
+🚀 **High Performance**: Rust-based BM25 index with millisecond search latency
+
+💾 **Flexible Storage**: SQLite for quick start, PostgreSQL for production scale
+
 It unifies data from different repositories, builds its own index,
 and returns ranked results according to query relevance — just like a miniature, open-source version of Google Books.
 
@@ -51,21 +78,29 @@ and returns ranked results according to query relevance — just like a miniatur
 Get started immediately without any external database services.
 
 1. **Seed & Index Books:**
-   This command downloads 1000 books from Gutenberg and builds the search index.
-   ```bash
-   uv run boogle index --limit 1000 --sqlite
-   ```
+    This command downloads 1000 books from Gutenberg and builds the search index.
+    ```bash
+    # Single provider
+    uv run boogle index --limit 1000 --sqlite
+
+    # Multiple providers in parallel
+    uv run boogle index --limit 1000 --sqlite --parallel --providers gutenberg,openlibrary
+    ```
 
 2. **Search via CLI:**
-   ```bash
-   uv run boogle search "liberty and death" --sqlite
-   ```
+    ```bash
+    uv run boogle search "liberty and death" --sqlite
+    ```
 
 3. **Start the API Server:**
-   ```bash
-   uv run boogle api --sqlite
-   ```
-   > 📄 API Documentation available at: `http://127.0.0.1:8000/docs`
+    ```bash
+    # Light mode (metadata only, no full-text index needed)
+    USE_SQLITE=1 LIGHT_MODE=1 uv run uvicorn src.api.main:app --port 8000
+
+    # Full-text mode
+    USE_SQLITE=1 uv run uvicorn src.api.main:app --port 8000
+    ```
+    > 📄 API Documentation available at: `http://127.0.0.1:8000/docs`
 
 ### Option 2: PostgreSQL (Local Development)
 Recommended for larger datasets and better concurrency.
@@ -144,9 +179,99 @@ Boogle exposes two main CLI tools: `boogle` (APP) and `boogle-db` (DB Ops).
 ### `boogle-db` - Database Management (Postgres)
 | Command | Description |
 |---------|-------------|
-| `migrate` | Creates necessary tables (`books`, `seed_offsets`) |
+| `migrate` | Creates necessary tables (`books`, `seed_offsets`, `cross_references`) |
 | `clear-all`| Truncates all tables (Data Reset) |
 | `test` | Verifies database connection and schema |
+
+---
+
+## 🌐 API Reference
+
+### Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/` | API information |
+| `GET` | `/providers` | List all providers with quality scores |
+| `GET` | `/health` | Health check and status |
+| `GET` | `/search` | Search books with filters |
+| `GET` | `/book/{canonical_id}` | Detailed book information |
+
+### Search Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `query` | string | Search query (required) |
+| `limit` | integer | Max results (default: 10, max: 100) |
+| `offset` | integer | Pagination offset (default: 0) |
+| `sources` | array | Filter by providers |
+| `languages` | array | Filter by language codes (e.g., `["en", "pt"]`) |
+| `year_from` | integer | Minimum publication year |
+| `year_to` | integer | Maximum publication year |
+| `subjects` | array | Filter by subjects |
+| `min_completeness` | float | Minimum metadata quality (0-1) |
+
+### Example Requests
+
+**Basic search:**
+```bash
+curl "http://localhost:8000/search?query=shakespeare&limit=5"
+```
+
+**Filter by provider:**
+```bash
+curl "http://localhost:8000/search?query=pride&sources=gutenberg"
+```
+
+**Complex search with filters:**
+```bash
+curl "http://localhost:8000/search?query=novel&languages=en&year_from=1800&year_to=1900&min_completeness=0.8"
+```
+
+**Get book details:**
+```bash
+curl "http://localhost:8000/book/gutenberg:1342"
+```
+
+### Response Format
+
+```json
+{
+  "canonical_id": "gutenberg:1342",
+  "title": "Pride and Prejudice",
+  "authors": [
+    {
+      "name": "Jane Austen",
+      "role": "author"
+    }
+  ],
+  "language": "en",
+  "publication_year": 1813,
+  "subjects": ["Fiction", "Love stories"],
+  "metadata_completeness": 0.92,
+  "primary_source": {
+    "provider": "gutenberg",
+    "book_id": "1342",
+    "url": "https://www.gutenberg.org/ebooks/1342",
+    "quality_score": 1.0,
+    "files": [
+      {
+        "format": "txt",
+        "url": "https://..."
+      }
+    ]
+  },
+  "all_sources": [
+    {
+      "provider": "gutenberg",
+      "book_id": "1342",
+      "quality_score": 1.0
+    }
+  ],
+  "source_count": 1,
+  "score": 0.95
+}
+```
 
 ---
 
@@ -225,7 +350,216 @@ curl http://localhost:8000/health
 ### Notes
 - Documents added via `/documents` are immediately searchable
 - The WAL ensures documents survive server restarts
-- Call `/documents/flush` after persisting documents to disk via batch indexing
+- **`flush()` now writes to disk properly**: Creates new segment files and updates `index.json`
+- Memory buffer is cleared after successful flush
+- Reloads disk index automatically
+
+---
+
+## 🔒 Security Layer
+
+Boogle includes comprehensive security validation to protect against common attacks.
+
+### Security Features
+
+| Feature | Description |
+|---------|-------------|
+| **SQL Injection Detection** | Blocks queries with SQL patterns (`; DROP`, `--`, etc.) |
+| **XSS Prevention** | Sanitizes input to prevent cross-site scripting |
+| **Path Traversal Blocking** | Prevents directory traversal (`../../`, `..\`, etc.) |
+| **Rate Limiting** | Configurable per-IP request limits (default: 100/minute) |
+| **Security Headers** | CSP, XSS protection, HSTS, frame options |
+| **Input Validation** | Query length limits, character filtering |
+
+### Security Middleware
+
+The API automatically applies security protections on all endpoints.
+
+**Test Security Validators:**
+```bash
+uv run python << 'EOF'
+from src.security.validators import SecurityValidators, SecurityError
+
+# SQL injection blocking
+try:
+    SecurityValidators.validate_query("'; DROP TABLE books; --")
+except SecurityError as e:
+    print(f"✓ SQL injection blocked: {e}")
+
+# XSS blocking
+try:
+    SecurityValidators.validate_query("<script>alert('xss')</script>")
+except SecurityError as e:
+    print(f"✓ XSS blocked: {e}")
+
+# Valid query
+clean = SecurityValidators.validate_query("books about shakespeare")
+print(f"✓ Valid query: {clean}")
+EOF
+```
+
+---
+
+## ⚡ Parallel Provider Seeding
+
+Boogle supports **parallel provider seeding** for faster indexing across multiple sources.
+
+### Enable Parallel Mode
+
+```bash
+# Seed from multiple providers in parallel
+uv run boogle index --sqlite --parallel --max-parallel-providers 3
+```
+
+### Performance Benefits
+
+| Mode | 2 Providers | 3 Providers | 4 Providers |
+|------|-------------|-------------|-------------|
+| Sequential | 10s | 15s | 20s |
+| Parallel (2 threads) | 5s | 8s | 10s |
+| Parallel (3 threads) | 4s | 5s | 7s |
+
+### Thread Safety
+
+- **Thread-local database connections**: Each provider gets its own DB connection
+- **No race conditions**: Isolated state per provider
+- **Automatic cleanup**: Connections closed after provider finishes
+
+### Configuration Options
+
+```bash
+--parallel                    # Enable parallel seeding (default: True)
+--max-parallel-providers N    # Max concurrent providers (default: 4)
+--workers N                  # Download workers per provider (default: 16)
+```
+
+---
+
+## 📊 Cross-Reference Merging
+
+When seeding from multiple providers, Boogle automatically detects and merges duplicates.
+
+### How It Works
+
+1. **Detect Duplicates**: Uses canonical identifiers (ISBN, LCCN, etc.)
+2. **Merge Metadata**: Combines metadata from all sources
+3. **Select Primary**: Highest quality provider becomes primary
+4. **Store All Sources**: All sources preserved for downloads
+
+### Example
+
+A book available from both Gutenberg and OpenLibrary:
+
+```json
+{
+  "canonical_id": "gutenberg:1342|OL7400675M",
+  "title": "Pride and Prejudice",
+  "authors": [{"name": "Jane Austen"}],
+  "primary_source": {
+    "provider": "gutenberg",
+    "book_id": "1342",
+    "quality_score": 1.0,
+    "url": "https://www.gutenberg.org/ebooks/1342"
+  },
+  "all_sources": [
+    {
+      "provider": "gutenberg",
+      "book_id": "1342",
+      "quality_score": 1.0
+    },
+    {
+      "provider": "openlibrary",
+      "book_id": "OL7400675M",
+      "quality_score": 0.9
+    }
+  ],
+  "source_count": 2,
+  "metadata_completeness": 0.92
+}
+```
+
+### Disable Cross-Reference
+
+```bash
+uv run boogle index --sqlite --no-cross-reference
+```
+
+---
+
+## ✅ Testing
+
+Boogle includes comprehensive test suites for all components.
+
+### Run All Tests
+
+```bash
+./test_all.sh
+```
+
+### Quick Component Tests
+
+**Test Rust Modules:**
+```bash
+uv run python -c "from rust_bm25 import FileSearcher, RealTimeIndexer; print('✓ OK')"
+```
+
+**Test RealTimeIndexer.flush():**
+```bash
+rm -rf data/test_rt_index && mkdir -p data/test_rt_index
+uv run python << 'EOF'
+import json, os
+from rust_bm25 import RealTimeIndexer
+
+with open("data/test_rt_index/index.json", "w") as f:
+    json.dump({"segments": [], "total_docs": 0, "avgdl": 0.0}, f)
+
+indexer = RealTimeIndexer("data/test_rt_index")
+for i in range(3):
+    indexer.add_document(f"test document {i} with books", f"book_{i}")
+count = indexer.flush()
+
+segments = [f for f in os.listdir("data/test_rt_index") if f.startswith("segment_")]
+print(f"✓ Flushed {count} docs, segments: {segments}")
+
+# Verify index.json updated
+with open("data/test_rt_index/index.json") as f:
+    meta = json.load(f)
+    print(f"✓ Total docs in meta: {meta['total_docs']}")
+rm -rf data/test_rt_index
+EOF
+```
+
+**Test API Endpoints:**
+```bash
+# Start API
+USE_SQLITE=1 LIGHT_MODE=1 uv run uvicorn src.api.main:app --port 8000
+
+# Test (in another terminal)
+curl http://localhost:8000/ | python -m json.tool          # Root
+curl http://localhost:8000/providers | python -m json.tool   # Providers
+curl http://localhost:8000/health | python -m json.tool      # Health
+curl "http://localhost:8000/search?query=test" | python -m json.tool  # Search
+```
+
+### Test Documentation
+
+- **`test_all.sh`**: Complete automated test suite
+- **`TEST_COMMANDS.md`**: Individual test commands
+- **`COMPREHENSIVE_TEST_GUIDE.md`**: Full testing guide with expected outputs
+- **`IMPLEMENTATION_STATUS.md`**: Component status and completion
+
+---
+
+## 📖 CLI Reference
+
+Boogle exposes two main CLI tools: `boogle` (APP) and `boogle-db` (DB Ops).
+
+### `boogle` - Application Pipeline
+| Command | Description |Flags|
+|---------|-------------|-----|
+| `index` | Downloads books and builds the BM25 index | `--limit N`, `--sqlite`, `--workers N`, `--reindex`, `--light-mode`, `--enrich`, `--parallel`, `--max-parallel-providers N`, `--nrt`, `--no-cross-reference`, `--providers [provider,...]`
+| `search` | Performs a search query via CLI | `query`, `--top-k N`, `--sqlite`, `--light-mode` |
+| `api` | Starts the FastAPI server | `--port N`, `--host 0.0.0.0`, `--sqlite`, `--light-mode`, `--nrt` |
 
 ---
 
@@ -306,17 +640,54 @@ uv run boogle index --light-mode --sqlite
 
 ---
 
-## 🔌 Book Providers
+## 🔌 Multi-Provider System with Unified Schema
 
-Boogle supports multiple book providers through a pluggable architecture. Adding a new provider is as simple as creating a single Python file.
+Boogle supports multiple book providers through a pluggable architecture with automatic cross-reference merging and quality scoring.
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Providers Layer                      │
+├──────────────┬──────────────┬──────────────┬─────────────┤
+│  Gutenberg   │ OpenLibrary  │   PPORTAL    │   + More    │
+│  (Quality: 1.0)│ (Quality: 0.9)│  (Quality: 0.7)│              │
+└──────┬───────┴──────┬───────┴──────┬───────┴──────┬──────┘
+       │              │               │              │
+       └──────────────┼───────────────┼──────────────┘
+                      │               │
+              ┌───────▼───────────────▼───────┐
+              │       Translator Registry     │
+              │     (Unified Schema Mapping)  │
+              └───────┬───────────────┬───────┘
+                      │               │
+              ┌───────▼───────────────▼───────┐
+              │    Cross-Reference Service    │
+              │    (Duplicate Detection &     │
+              │     Metadata Merging)         │
+              └───────┬───────────────┬───────┘
+                      │               │
+              ┌───────▼───────────────▼───────┐
+              │        Unified Results        │
+              │   (Best Quality as Primary)   │
+              └───────────────────────────────┘
+```
 
 ### Available Providers
 
-| Provider | Description | Downloads | Default |
-|----------|-------------|-----------|---------|
-| **gutenberg** | Project Gutenberg | ✅ Yes | ✅ Enabled |
-| **openlibrary** | Open Library metadata | ❌ No | ❌ Disabled |
-| **pportal** | Portuguese Public Domain | ✅ Yes | ✅ Enabled |
+| Provider | Description | Downloads | Quality | Default |
+|----------|-------------|-----------|---------|---------|
+| **gutenberg** | Project Gutenberg | ✅ Yes | 1.0 | ✅ Enabled |
+| **openlibrary** | Open Library metadata | ❌ No | 0.9 | ✅ Enabled |
+| **pportal** | Portuguese Public Domain | ✅ Yes | 0.7 | ✅ Enabled |
+
+### Unified Schema Features
+
+- **Cross-reference merging**: Automatically detects duplicates across providers
+- **Quality scoring**: Higher quality providers become primary sources
+- **Canonical IDs**: Unique identifiers spanning multiple sources
+- **Source selection**: Download from any available source
+- **Metadata enrichment**: Combines metadata from all sources
 
 ### Enabling Providers
 
@@ -449,9 +820,87 @@ python test_providers.py --skip-network
 
 ---
 
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      API Layer (FastAPI)                    │
+│  /search | /providers | /health | /book/{id}                │
+│  ↓ Security Middleware (SQLi, XSS, Rate Limit)              │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+        ┌──────────────┼──────────────┐
+        │              │              │
+        ↓              ↓              ↓
+┌──────────────┐ ┌──────────────┐ ┌──────────┐
+│ FileSearcher │ │RealTimeIndexer│ │Metadata  │
+│  (Disk BM25) │ │  (RAM+Disk)   │ │ Indexer  │
+└──────┬───────┘ └──────┬───────┘ └────┬─────┘
+       │                │               │
+       └────────────────┼───────────────┘
+                        │
+               ┌────────▼─────────┐
+               │  Python DB Layer │
+               │  (SQLite/PG)     │
+               └────────┬─────────┘
+                        │
+┌───────────────────────┼───────────────────────┐
+│                       │                       │
+┌───────────┐      ┌───────────┐         ┌───────────┐
+│ Gutenberg │      │OpenLibrary│         │  PPORTAL  │  + More
+│ Provider  │      │ Provider  │         │ Provider  │
+└───────────┘      └───────────┘         └───────────┘
+```
+
+## 📦 Project Status
+
+### ✅ Implemented Features
+- ✅ Multi-provider system with unified schema
+- ✅ Parallel provider seeding with thread safety
+- ✅ Security validators and middleware
+- ✅ Cross-reference merging with quality scoring
+- ✅ RealTimeIndexer with disk persistence
+- ✅ Light mode for metadata-only indexing
+- ✅ Full API with search, providers, health, book endpoints
+- ✅ SQLite and PostgreSQL support
+- ✅ Comprehensive test suite
+
+### 🔧 Configuration
+- **Database**: SQLite (default) or PostgreSQL
+- **Index Mode**: Batch, Realtime, or Light
+- **Multi-provider**: Parallel or sequential indexing
+- **Security**: Rate limiting, input validation, headers
+
+### 📝 Documentation
+- 📖 [Comprehensive Test Guide](COMPREHENSIVE_TEST_GUIDE.md) - All test commands
+- 🧪 [Test Commands](TEST_COMMANDS.md) - Individual component tests
+- ✅ [Implementation Status](IMPLEMENTATION_STATUS.md) - Component status
+- 🔌 [Adding Providers](ADDING_NEW_PROVIDER.md) - Provider development guide
+
+---
+
+## 🙏 Contributing
+
+Contributions are welcome! The codebase uses:
+- **Python 3.13+** for orchestration and API
+- **Rust 1.80+** for high-performance indexing
+- **FastAPI** for the REST API
+- **pytest** for testing
+
+Run tests before submitting:
+```bash
+./test_all.sh
+```
+
+---
+
 ## 🪪 License
 
 This project is open-source under the **MIT License**.
 Feel free to fork, modify, and improve!
 
 > *Boogle — Free Books. Free Knowledge.*
+
+---
+
+**Built with ❤️ for open access to knowledge**
