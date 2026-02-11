@@ -37,13 +37,24 @@ from src.api.models import (
     FileInfo,
 )
 
+# Enhanced search imports
+try:
+    from src.search import EnhancedSearcher, CachedEnhancedSearcher
+
+    ENHANCED_SEARCH_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Enhanced search not available: {e}")
+    ENHANCED_SEARCH_AVAILABLE = False
+
 # Global state
 searcher = None
 realtime_indexer = None
 database = None
 metadata_indexer = None
+enhanced_searcher = None
 use_realtime = False
 use_light_mode = False
+use_enhanced_search = False
 
 
 @asynccontextmanager
@@ -54,14 +65,19 @@ async def lifespan(app: FastAPI):
         realtime_indexer, \
         database, \
         metadata_indexer, \
+        enhanced_searcher, \
         use_realtime, \
-        use_light_mode
+        use_light_mode, \
+        use_enhanced_search
 
     index_dir = os.getenv("INDEX_DIR", "data/index")
     metadata_index_dir = os.getenv("METADATA_INDEX_DIR", "data/index_metadata")
     use_sqlite = os.getenv("USE_SQLITE", "0") == "1"
     use_realtime = os.getenv("REALTIME_INDEX", "0") == "1"
     use_light_mode = os.getenv("LIGHT_MODE", "0") == "1"
+    use_enhanced_search = (
+        os.getenv("ENHANCED_SEARCH", "1") == "1" and ENHANCED_SEARCH_AVAILABLE
+    )
 
     try:
         from rust_bm25 import FileSearcher, RealTimeIndexer
@@ -82,6 +98,26 @@ async def lifespan(app: FastAPI):
             searcher = FileSearcher(index_dir)
             searcher.set_stopwords(stopwords)
             database = PostgresRepository(use_sqlite=use_sqlite)
+
+            # Initialize enhanced searcher if available
+            if use_enhanced_search and ENHANCED_SEARCH_AVAILABLE:
+                try:
+                    print(
+                        "Initializing enhanced search (spell correction + query expansion)..."
+                    )
+                    enhanced_searcher = CachedEnhancedSearcher(
+                        index_dir=index_dir,
+                        enable_spellcheck=True,
+                        enable_expansion=True,
+                        enable_language_detection=True,
+                        expansion_boost=0.3,
+                        cache_size=1000,
+                        cache_ttl=300,
+                    )
+                    print("Enhanced search initialized successfully")
+                except Exception as e:
+                    print(f"Warning: Failed to initialize enhanced search: {e}")
+                    use_enhanced_search = False
     except ImportError:
         # Rust module not available
         database = PostgresRepository(use_sqlite=use_sqlite)
@@ -341,6 +377,91 @@ def _build_search_result(meta: dict, score: float) -> SearchResult:
         source_count=1,
         score=score,
     )
+
+
+@app.get("/search/enhanced")
+async def search_enhanced(
+    query: str = Query(..., min_length=1, max_length=1000),
+    limit: int = Query(10, ge=1, le=100),
+    explain: bool = Query(
+        False, description="Return detailed explanation of enhancements"
+    ),
+    spellcheck: bool = Query(True, description="Apply spell correction"),
+    expand: bool = Query(True, description="Apply query expansion"),
+):
+    """
+    Search with NLP enhancements (spell correction + query expansion).
+
+    Features:
+    - Automatic language detection
+    - Spell correction for typos
+    - Query expansion with synonyms
+    - Detailed explanation of enhancements
+    """
+    if database is None:
+        raise HTTPException(status_code=500, detail="Database not initialized")
+
+    if not use_enhanced_search or enhanced_searcher is None:
+        # Fall back to regular search
+        return await search_books(query, limit)
+
+    # Validate query
+    try:
+        query = SecurityValidators.validate_query(query)
+    except SecurityError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        if explain:
+            # Return detailed explanation
+            explanation = enhanced_searcher.search_with_explanation(query, limit)
+            return explanation
+        else:
+            # Standard enhanced search
+            results, query_info = enhanced_searcher.search(
+                query,
+                top_k=limit,
+                apply_spellcheck=spellcheck,
+                apply_expansion=expand,
+            )
+
+            # Convert to API format
+            api_results = []
+            for result in results:
+                # Get metadata
+                meta = None
+                for source in ["gutenberg", "openlibrary", "pportal"]:
+                    meta = database.get_book(source, result.book_id)
+                    if meta:
+                        break
+
+                if meta:
+                    api_results.append(_build_search_result(meta, result.score))
+
+            # Add enhancement metadata
+            response = {
+                "results": api_results,
+                "enhancements": {
+                    "spell_corrected": query_info.get("was_corrected", False),
+                    "query_expanded": query_info.get("was_expanded", False),
+                    "language": query_info.get("language"),
+                },
+                "original_query": query_info["original_query"],
+                "corrected_query": query_info.get("corrected_query", query),
+            }
+
+            if query_info.get("was_corrected"):
+                response["spell_corrections"] = query_info.get("spell_corrections", {})
+
+            if query_info.get("was_expanded"):
+                response["expansions"] = query_info.get("expansions", {})
+
+            return response
+
+    except Exception as e:
+        print(f"Enhanced search error: {e}")
+        # Fallback to regular search
+        return await search_books(query, limit)
 
 
 @app.get("/book/{canonical_id}", response_model=BookDetailResponse)
