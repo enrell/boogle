@@ -270,14 +270,15 @@ class PPORTALProvider(BaseBookProvider):
         """PPORTAL provides download links."""
         return True
 
+
     def download_book(
         self, book_id: str, output_dir: Path, metadata: Optional[Dict] = None
     ) -> Optional[Path]:
         """
-        Download book from Domínio Público.
-
-        Uses requests first, then falls back to Camoufox browser automation
-        for sites requiring JavaScript/session handling.
+        Download book from Domínio Público with PDF-to-text extraction.
+        
+        Downloads PDFs and extracts text content to save as .txt files
+        for efficient indexing and searching.
         """
         meta = metadata or self.extract_metadata(book_id)
         files = meta.get("files", [])
@@ -286,107 +287,141 @@ class PPORTALProvider(BaseBookProvider):
             return None
 
         download_url = files[0]["url"]
-        ext = files[0].get("format", "pdf")
         safe_book_id = sanitize_filename(str(book_id))
-        filepath = output_dir / f"{safe_book_id}.{ext}"
+        pdf_path = output_dir / f"{safe_book_id}.pdf"
+        txt_path = output_dir / f"{safe_book_id}.txt"
+        
+        # If text file already exists, skip
+        if txt_path.exists():
+            return txt_path
 
-        # First try direct download with requests
+        # Download PDF
+        pdf_downloaded = False
+        
+        # Try direct download first
         try:
             response = self.session.get(download_url, timeout=30, allow_redirects=True)
             if response.status_code == 200 and len(response.content) > 1000:
-                filepath.write_bytes(response.content)
-                print(f"  Downloaded: {meta.get('title', book_id)}")
-                return filepath
+                pdf_path.write_bytes(response.content)
+                pdf_downloaded = True
         except Exception:
             pass
-
-        # Fallback to browser automation if Camoufox available
-        if CAMOUFOX_AVAILABLE:
+        
+        # Fallback to browser if needed
+        if not pdf_downloaded and CAMOUFOX_AVAILABLE:
             try:
                 result = download_with_browser(
-                    download_url, filepath, headless=True, timeout=60
+                    download_url, pdf_path, headless=True, timeout=60
                 )
                 if result:
-                    print(f"  Downloaded via browser: {meta.get('title', book_id)}")
-                    return result
+                    pdf_downloaded = True
             except Exception:
                 pass
-
-        return None
-
-        download_url = files[0]["url"]
-        ext = files[0].get("format", "pdf")
-        safe_book_id = sanitize_filename(str(book_id))
-        filepath = output_path / f"{safe_book_id}.{ext}"
-
-        # First try direct download with requests
-        try:
-            response = self.session.get(download_url, timeout=30, allow_redirects=True)
-            if response.status_code == 200 and len(response.content) > 1000:
-                filepath.write_bytes(response.content)
-                print(f"  Downloaded: {meta.get('title', book_id)}")
-                return filepath
-        except Exception:
-            pass
-
-        # Fallback to browser automation if Camoufox available
-        if CAMOUFOX_AVAILABLE:
+        
+        if not pdf_downloaded:
+            return None
+            
+        # Extract text from PDF
+        txt_extracted = self._extract_text_from_pdf(pdf_path, txt_path)
+        
+        if txt_extracted:
+            # Clean up PDF after extracting text
             try:
-                result = BrowserDownloader.download_with_browser(
-                    download_url, filepath, headless=True, timeout=60
-                )
-                if result:
-                    print(f"  Downloaded via browser: {meta.get('title', book_id)}")
-                    return result
+                pdf_path.unlink()
             except Exception:
                 pass
+            return txt_path
+        else:
+            # If text extraction fails, return PDF
+            return pdf_path
 
-        return None
-
-        download_url = files[0]["url"]
-
-        # Try to download without verbose output
+    def _extract_text_from_pdf(self, pdf_path: Path, txt_path: Path) -> bool:
+        """
+        Extract text from PDF using available libraries.
+        Tries multiple libraries in order of preference.
+        """
         try:
-            response = self.session.get(download_url, timeout=30, allow_redirects=True)
-            if response.status_code == 200 and len(response.content) > 1000:
-                ext = files[0].get("format", "pdf")
-                # Clean book_id for filename (remove invalid characters)
-                safe_book_id = re.sub(r'[<>:"/\\|?*]', "_", str(book_id))
-                filepath = output_dir / f"{safe_book_id}.{ext}"
-                filepath.write_bytes(response.content)
-                print(f"  Downloaded: {meta.get('title', book_id)}")
-                return filepath
+            # Try PyPDF2
+            try:
+                import PyPDF2
+                with open(pdf_path, 'rb') as f:
+                    reader = PyPDF2.PdfReader(f)
+                    text_parts = []
+                    for page in reader.pages:
+                        page_text = page.extract_text()
+                        if page_text:
+                            text_parts.append(page_text)
+                    
+                    full_text = '\n\n'.join(text_parts)
+                    if full_text.strip():
+                        txt_path.write_text(full_text, encoding='utf-8')
+                        return True
+            except ImportError:
+                pass
+            except Exception:
+                pass
+            
+            # Try pdfplumber
+            try:
+                import pdfplumber
+                with pdfplumber.open(pdf_path) as pdf:
+                    text_parts = []
+                    for page in pdf.pages:
+                        page_text = page.extract_text()
+                        if page_text:
+                            text_parts.append(page_text)
+                    
+                    full_text = '\n\n'.join(text_parts)
+                    if full_text.strip():
+                        txt_path.write_text(full_text, encoding='utf-8')
+                        return True
+            except ImportError:
+                pass
+            except Exception:
+                pass
+            
+            # Try pdfminer.six
+            try:
+                from pdfminer.high_level import extract_text
+                text = extract_text(str(pdf_path))
+                if text.strip():
+                    txt_path.write_text(text, encoding='utf-8')
+                    return True
+            except ImportError:
+                pass
+            except Exception:
+                pass
+                
         except Exception:
-            # Silently fail - most PPORTAL books require browser session
             pass
-
-        return None
+            
+        return False
 
     def filter_book(self, metadata: Dict) -> bool:
         """Filter out invalid entries."""
         if not metadata.get("title"):
             return False
-
+        
         title = metadata.get("title", "").strip()
         if len(title) < 3:
             return False
-
+        
         return True
 
     def search_books(self, query: str, limit: int = 10) -> List[Dict[str, str]]:
         """Search PPORTAL dataset for books."""
         works = self._load_works_data()
-
+        
         query_lower = query.lower()
         results = []
-
+        
         for row in works:
             if len(results) >= limit:
                 break
-
+            
             title = (row.get("work_title") or "").lower()
             author = (row.get("work_authors") or "").lower()
-
+            
             if query_lower in title or query_lower in author:
                 work_id = row.get("original_id", "")
                 download_link = row.get("download_link", "")
@@ -401,16 +436,16 @@ class PPORTALProvider(BaseBookProvider):
                         else self.get_book_url(str(work_id)),
                     }
                 )
-
+        
         return results
 
     def get_dataset_info(self) -> Dict:
         """Get information about the loaded dataset."""
         works = self._load_works_data()
-
+        
         # Count how many have download links
         with_links = sum(1 for w in works if w.get("download_link"))
-
+        
         return {
             "total_works": len(works),
             "works_with_download_links": with_links,

@@ -1,15 +1,16 @@
 """
 Browser-based downloader using Camoufox for sites requiring JavaScript/session handling.
 
-Provides a wrapper around Camoufox for downloading files from sites that
-block direct HTTP requests.
+Provides async concurrent downloads with retry logic and PDF-to-text extraction.
 """
 
 import asyncio
 import tempfile
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Tuple
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 try:
     from camoufox import AsyncCamoufox
@@ -21,49 +22,56 @@ except ImportError:
 
 class BrowserDownloader:
     """
-    Browser-based downloader for sites requiring session handling.
-
-    Uses Camoufox for headless browser automation to download files
-    from sites that require JavaScript, cookies, or session authentication.
+    Browser-based downloader with concurrent downloads and retry logic.
     """
 
-    def __init__(self, headless: bool = True, timeout: int = 30):
-        """
-        Initialize browser downloader.
-
-        Args:
-            headless: Run browser in headless mode (default: True)
-            timeout: Timeout in seconds for page load (default: 30)
-        """
+    def __init__(self, headless: bool = True, timeout: int = 30, max_workers: int = 4):
         self.headless = headless
         self.timeout = timeout
-        self._fox = None
+        self.max_workers = max_workers
 
-    async def __aenter__(self):
-        """Async context manager entry."""
-        if CAMOUFOX_AVAILABLE:
-            self._fox = await AsyncCamoufox().__aenter__()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        if self._fox:
-            await self._fox.__aexit__(exc_type, exc_val, exc_tb)
-
-    async def download_file(
-        self, url: str, output_path: Path, wait_for_download: bool = True
-    ) -> Optional[Path]:
+    async def download_batch(
+        self,
+        downloads: List[Tuple[str, Path]],
+        retry_attempts: int = 3,
+        retry_delay: float = 2.0,
+    ) -> List[Tuple[str, Path, Optional[Path]]]:
         """
-        Download file using browser automation.
+        Download multiple files concurrently with retry logic.
 
         Args:
-            url: URL to download from
-            output_path: Path to save the file
-            wait_for_download: Wait for download to complete
+            downloads: List of (url, output_path) tuples
+            retry_attempts: Number of retry attempts per download
+            retry_delay: Delay between retries in seconds
 
         Returns:
-            Path to downloaded file if successful, None otherwise
+            List of (url, output_path, result_path) tuples
         """
+        if not CAMOUFOX_AVAILABLE:
+            return [(url, out, None) for url, out in downloads]
+
+        semaphore = asyncio.Semaphore(self.max_workers)
+
+        async def download_with_retry(
+            url: str, output_path: Path
+        ) -> Tuple[str, Path, Optional[Path]]:
+            async with semaphore:
+                for attempt in range(retry_attempts):
+                    try:
+                        result = await self._download_single(url, output_path)
+                        if result:
+                            return url, output_path, result
+                    except Exception as e:
+                        if attempt < retry_attempts - 1:
+                            await asyncio.sleep(retry_delay * (attempt + 1))
+                        continue
+                return url, output_path, None
+
+        tasks = [download_with_retry(url, out) for url, out in downloads]
+        return await asyncio.gather(*tasks)
+
+    async def _download_single(self, url: str, output_path: Path) -> Optional[Path]:
+        """Download a single file."""
         if not CAMOUFOX_AVAILABLE:
             return None
 
@@ -73,14 +81,12 @@ class BrowserDownloader:
 
                 # Navigate to the URL
                 await page.goto(url, timeout=self.timeout * 1000)
-
-                # Wait for page to load
                 await page.wait_for_load_state("networkidle")
 
                 # Check if this is a direct PDF link
-                content_type = await page.evaluate("""() => {
-                    return document.contentType || 'text/html';
-                }""")
+                content_type = await page.evaluate(
+                    '() => document.contentType || "text/html"'
+                )
 
                 if "pdf" in content_type.lower():
                     # Direct PDF - download it
@@ -90,14 +96,12 @@ class BrowserDownloader:
                 else:
                     # HTML page - try to find download link
                     download_link = await page.evaluate("""() => {
-                        // Look for common download links
-                        const links = document.querySelectorAll('a[href*=".pdf"], a[download], button[onclick*="download"]');
+                        const links = document.querySelectorAll('a[href*=".pdf"], a[download]');
                         for (const link of links) {
                             if (link.href && link.href.includes('.pdf')) {
                                 return link.href;
                             }
                         }
-                        // Look for iframe with PDF
                         const iframes = document.querySelectorAll('iframe[src*=".pdf"]');
                         if (iframes.length > 0) {
                             return iframes[0].src;
@@ -106,113 +110,99 @@ class BrowserDownloader:
                     }""")
 
                     if download_link:
-                        # Navigate to the PDF
                         await page.goto(download_link, timeout=self.timeout * 1000)
-                        await asyncio.sleep(1)  # Wait for PDF to load
-
-                        # Try to download
+                        await asyncio.sleep(1)
                         pdf_data = await page.pdf()
                         output_path.write_bytes(pdf_data)
                         return output_path
 
-                return None
-
         except Exception:
-            return None
+            pass
 
-    async def download_with_session(
-        self, url: str, output_path: Path, pre_actions: Optional[list] = None
-    ) -> Optional[Path]:
-        """
-        Download with optional pre-actions (click, form submit, etc).
+        return None
 
-        Args:
-            url: Initial URL
-            output_path: Path to save file
-            pre_actions: List of actions to perform before download
-                        e.g., [{'action': 'click', 'selector': '#download-btn'}]
 
-        Returns:
-            Path to downloaded file if successful
-        """
-        if not CAMOUFOX_AVAILABLE:
-            return None
+def extract_text_from_pdf(pdf_path: Path, txt_path: Path) -> bool:
+    """
+    Extract text from PDF and save as .txt file.
 
+    Args:
+        pdf_path: Path to PDF file
+        txt_path: Path to save text file
+
+    Returns:
+        True if extraction successful
+    """
+    try:
+        # Try PyPDF2 first
         try:
-            async with AsyncCamoufox() as fox:
-                page = await fox.new_page()
+            import PyPDF2
 
-                # Navigate to initial page
-                await page.goto(url, timeout=self.timeout * 1000)
-                await page.wait_for_load_state("networkidle")
+            with open(pdf_path, "rb") as pdf_file:
+                reader = PyPDF2.PdfReader(pdf_file)
+                text = []
+                for page in reader.pages:
+                    text.append(page.extract_text())
+                full_text = "\n".join(filter(None, text))
+                if full_text.strip():
+                    txt_path.write_text(full_text, encoding="utf-8")
+                    return True
+        except ImportError:
+            pass
 
-                # Execute pre-actions
-                if pre_actions:
-                    for action in pre_actions:
-                        if action.get("action") == "click":
-                            selector = action.get("selector")
-                            if selector:
-                                await page.click(selector)
-                                await asyncio.sleep(1)
-                        elif action.get("action") == "wait":
-                            await asyncio.sleep(action.get("seconds", 1))
-                        elif action.get("action") == "goto":
-                            await page.goto(
-                                action.get("url"), timeout=self.timeout * 1000
-                            )
+        # Try pdfplumber
+        try:
+            import pdfplumber
 
-                # Try to download current page as PDF
-                pdf_data = await page.pdf()
-                output_path.write_bytes(pdf_data)
-                return output_path
+            with pdfplumber.open(pdf_path) as pdf:
+                text = []
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text.append(page_text)
+                full_text = "\n".join(text)
+                if full_text.strip():
+                    txt_path.write_text(full_text, encoding="utf-8")
+                    return True
+        except ImportError:
+            pass
 
-        except Exception:
-            return None
+        # Try pdfminer.six
+        try:
+            from pdfminer.high_level import extract_text
+
+            text = extract_text(str(pdf_path))
+            if text.strip():
+                txt_path.write_text(text, encoding="utf-8")
+                return True
+        except ImportError:
+            pass
+
+    except Exception:
+        pass
+
+    return False
 
 
 def sanitize_filename(name: str) -> str:
-    """
-    Sanitize filename by removing invalid characters.
-
-    Args:
-        name: Original filename
-
-    Returns:
-        Sanitized filename safe for filesystem
-    """
-    # Remove or replace invalid characters
+    """Sanitize filename by removing invalid characters."""
     sanitized = re.sub(r'[<>:"/\\|?*]', "_", name)
-    # Remove control characters
     sanitized = re.sub(r"[\x00-\x1f\x7f-\x9f]", "", sanitized)
-    # Limit length
     if len(sanitized) > 200:
         sanitized = sanitized[:200]
     return sanitized.strip()
 
 
-# Synchronous wrapper for easier usage
 def download_with_browser(
     url: str, output_path: Path, headless: bool = True, timeout: int = 30
 ) -> Optional[Path]:
-    """
-    Synchronous wrapper for browser-based download.
-
-    Args:
-        url: URL to download from
-        output_path: Path to save the file
-        headless: Run browser in headless mode
-        timeout: Timeout in seconds
-
-    Returns:
-        Path to downloaded file if successful, None otherwise
-    """
+    """Synchronous wrapper for single download."""
     if not CAMOUFOX_AVAILABLE:
         return None
 
     async def _download():
         downloader = BrowserDownloader(headless=headless, timeout=timeout)
-        async with downloader:
-            return await downloader.download_file(url, output_path)
+        return await downloader._download_single(url, output_path)
 
     try:
         return asyncio.get_event_loop().run_until_complete(_download())
