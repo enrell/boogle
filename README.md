@@ -316,7 +316,7 @@ Boogle supports multiple book providers through a pluggable architecture. Adding
 |----------|-------------|-----------|---------|
 | **gutenberg** | Project Gutenberg | ✅ Yes | ✅ Enabled |
 | **openlibrary** | Open Library metadata | ❌ No | ❌ Disabled |
-| **bndigital** | Brazilian National Library | ❌ No | ❌ Disabled |
+| **pportal** | Portuguese Public Domain | ✅ Yes | ✅ Enabled |
 
 ### Enabling Providers
 
@@ -326,8 +326,8 @@ Providers can be enabled via environment variables:
 # Enable Open Library
 export BOOGLE_PROVIDER_OPENLIBRARY_ENABLED=1
 
-# Enable BNDigital
-export BOOGLE_PROVIDER_BNDIGITAL_ENABLED=1
+# Enable PPORTAL (Portuguese literature)
+export BOOGLE_PROVIDER_PPORTAL_ENABLED=1
 
 # Disable Gutenberg (if you only want other providers)
 export BOOGLE_PROVIDER_GUTENBERG_ENABLED=0
@@ -358,7 +358,7 @@ uv run boogle index --sqlite
 uv run boogle search "shakespeare" --sqlite
 
 # Search only in specific provider
-uv run boogle search "machado de assis" --sqlite --source bndigital
+uv run boogle search "machado de assis" --sqlite --source pportal
 ```
 
 ### Creating a New Provider
