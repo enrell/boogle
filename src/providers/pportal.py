@@ -270,13 +270,12 @@ class PPORTALProvider(BaseBookProvider):
         """PPORTAL provides download links."""
         return True
 
-
     def download_book(
         self, book_id: str, output_dir: Path, metadata: Optional[Dict] = None
     ) -> Optional[Path]:
         """
         Download book from Domínio Público with PDF-to-text extraction.
-        
+
         Downloads PDFs and extracts text content to save as .txt files
         for efficient indexing and searching.
         """
@@ -290,14 +289,14 @@ class PPORTALProvider(BaseBookProvider):
         safe_book_id = sanitize_filename(str(book_id))
         pdf_path = output_dir / f"{safe_book_id}.pdf"
         txt_path = output_dir / f"{safe_book_id}.txt"
-        
+
         # If text file already exists, skip
         if txt_path.exists():
             return txt_path
 
         # Download PDF
         pdf_downloaded = False
-        
+
         # Try direct download first
         try:
             response = self.session.get(download_url, timeout=30, allow_redirects=True)
@@ -306,7 +305,7 @@ class PPORTALProvider(BaseBookProvider):
                 pdf_downloaded = True
         except Exception:
             pass
-        
+
         # Fallback to browser if needed
         if not pdf_downloaded and CAMOUFOX_AVAILABLE:
             try:
@@ -317,13 +316,13 @@ class PPORTALProvider(BaseBookProvider):
                     pdf_downloaded = True
             except Exception:
                 pass
-        
+
         if not pdf_downloaded:
             return None
-            
+
         # Extract text from PDF
         txt_extracted = self._extract_text_from_pdf(pdf_path, txt_path)
-        
+
         if txt_extracted:
             # Clean up PDF after extracting text
             try:
@@ -340,88 +339,104 @@ class PPORTALProvider(BaseBookProvider):
         Extract text from PDF using available libraries.
         Tries multiple libraries in order of preference.
         """
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        # Check if PDF file exists and has content
+        if not pdf_path.exists():
+            logger.debug(f"PDF file not found: {pdf_path}")
+            return False
+
+        if pdf_path.stat().st_size < 100:
+            logger.debug(f"PDF file too small: {pdf_path}")
+            return False
+
+        # Try PyPDF2
         try:
-            # Try PyPDF2
-            try:
-                import PyPDF2
-                with open(pdf_path, 'rb') as f:
-                    reader = PyPDF2.PdfReader(f)
-                    text_parts = []
-                    for page in reader.pages:
-                        page_text = page.extract_text()
-                        if page_text:
-                            text_parts.append(page_text)
-                    
-                    full_text = '\n\n'.join(text_parts)
-                    if full_text.strip():
-                        txt_path.write_text(full_text, encoding='utf-8')
-                        return True
-            except ImportError:
-                pass
-            except Exception:
-                pass
-            
-            # Try pdfplumber
-            try:
-                import pdfplumber
-                with pdfplumber.open(pdf_path) as pdf:
-                    text_parts = []
-                    for page in pdf.pages:
-                        page_text = page.extract_text()
-                        if page_text:
-                            text_parts.append(page_text)
-                    
-                    full_text = '\n\n'.join(text_parts)
-                    if full_text.strip():
-                        txt_path.write_text(full_text, encoding='utf-8')
-                        return True
-            except ImportError:
-                pass
-            except Exception:
-                pass
-            
-            # Try pdfminer.six
-            try:
-                from pdfminer.high_level import extract_text
-                text = extract_text(str(pdf_path))
-                if text.strip():
-                    txt_path.write_text(text, encoding='utf-8')
+            import PyPDF2
+
+            with open(pdf_path, "rb") as f:
+                reader = PyPDF2.PdfReader(f)
+                text_parts = []
+                for page in reader.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text_parts.append(page_text)
+
+                full_text = "\n\n".join(text_parts)
+                if full_text.strip():
+                    txt_path.write_text(full_text, encoding="utf-8")
+                    logger.debug(f"Extracted {len(full_text)} chars using PyPDF2")
                     return True
-            except ImportError:
-                pass
-            except Exception:
-                pass
-                
-        except Exception:
-            pass
-            
+        except ImportError:
+            logger.debug("PyPDF2 not available")
+        except Exception as e:
+            logger.debug(f"PyPDF2 extraction failed: {e}")
+
+        # Try pdfplumber
+        try:
+            import pdfplumber
+
+            with pdfplumber.open(pdf_path) as pdf:
+                text_parts = []
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text_parts.append(page_text)
+
+                full_text = "\n\n".join(text_parts)
+                if full_text.strip():
+                    txt_path.write_text(full_text, encoding="utf-8")
+                    logger.debug(f"Extracted {len(full_text)} chars using pdfplumber")
+                    return True
+        except ImportError:
+            logger.debug("pdfplumber not available")
+        except Exception as e:
+            logger.debug(f"pdfplumber extraction failed: {e}")
+
+        # Try pdfminer.six
+        try:
+            from pdfminer.high_level import extract_text
+
+            text = extract_text(str(pdf_path))
+            if text.strip():
+                txt_path.write_text(text, encoding="utf-8")
+                logger.debug(f"Extracted {len(text)} chars using pdfminer")
+                return True
+        except ImportError:
+            logger.debug("pdfminer not available")
+        except Exception as e:
+            logger.debug(f"pdfminer extraction failed: {e}")
+
+        logger.debug(f"All text extraction methods failed for {pdf_path}")
         return False
 
     def filter_book(self, metadata: Dict) -> bool:
         """Filter out invalid entries."""
         if not metadata.get("title"):
             return False
-        
+
         title = metadata.get("title", "").strip()
         if len(title) < 3:
             return False
-        
+
         return True
 
     def search_books(self, query: str, limit: int = 10) -> List[Dict[str, str]]:
         """Search PPORTAL dataset for books."""
         works = self._load_works_data()
-        
+
         query_lower = query.lower()
         results = []
-        
+
         for row in works:
             if len(results) >= limit:
                 break
-            
+
             title = (row.get("work_title") or "").lower()
             author = (row.get("work_authors") or "").lower()
-            
+
             if query_lower in title or query_lower in author:
                 work_id = row.get("original_id", "")
                 download_link = row.get("download_link", "")
@@ -436,16 +451,16 @@ class PPORTALProvider(BaseBookProvider):
                         else self.get_book_url(str(work_id)),
                     }
                 )
-        
+
         return results
 
     def get_dataset_info(self) -> Dict:
         """Get information about the loaded dataset."""
         works = self._load_works_data()
-        
+
         # Count how many have download links
         with_links = sum(1 for w in works if w.get("download_link"))
-        
+
         return {
             "total_works": len(works),
             "works_with_download_links": with_links,

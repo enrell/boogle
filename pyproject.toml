@@ -18,6 +18,9 @@ dependencies = [
     "sqlalchemy>=2.0.0",
     "alembic>=1.13.0",
     "camoufox[geoip]>=0.4.11",
+    "pypdf2>=3.0.1",
+    "pdfplumber>=0.11.9",
+    "pdfminer-six>=20251230",
 ]
 
 [project.scripts]
