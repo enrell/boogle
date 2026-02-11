@@ -820,38 +820,6 @@ python test_providers.py --skip-network
 
 ---
 
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      API Layer (FastAPI)                    │
-│  /search | /providers | /health | /book/{id}                │
-│  ↓ Security Middleware (SQLi, XSS, Rate Limit)              │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-        ┌──────────────┼──────────────┐
-        │              │              │
-        ↓              ↓              ↓
-┌──────────────┐ ┌──────────────┐ ┌──────────┐
-│ FileSearcher │ │RealTimeIndexer│ │Metadata  │
-│  (Disk BM25) │ │  (RAM+Disk)   │ │ Indexer  │
-└──────┬───────┘ └──────┬───────┘ └────┬─────┘
-       │                │               │
-       └────────────────┼───────────────┘
-                        │
-               ┌────────▼─────────┐
-               │  Python DB Layer │
-               │  (SQLite/PG)     │
-               └────────┬─────────┘
-                        │
-┌───────────────────────┼───────────────────────┐
-│                       │                       │
-┌───────────┐      ┌───────────┐         ┌───────────┐
-│ Gutenberg │      │OpenLibrary│         │  PPORTAL  │  + More
-│ Provider  │      │ Provider  │         │ Provider  │
-└───────────┘      └───────────┘         └───────────┘
-```
-
 ## 📦 Project Status
 
 ### ✅ Implemented Features
