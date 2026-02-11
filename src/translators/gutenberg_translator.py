@@ -85,7 +85,6 @@ class GutenbergTranslator(SchemaTranslator):
         return {
             "description": None,  # Gutenberg doesn't provide descriptions
             "copyright_status": raw.get("copyright_status", "Public Domain"),
-            "credits": raw.get("credits"),
         }
 
     def translate_media(
@@ -124,7 +123,6 @@ class GutenbergTranslator(SchemaTranslator):
         book_id = str(raw.get("book_id", ""))
 
         return {
-            "gutenberg_id": book_id,
             "provider_ids": {"gutenberg": book_id},
         }
 
