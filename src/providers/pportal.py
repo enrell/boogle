@@ -29,6 +29,11 @@ except ImportError:
 
 from src.providers.base import BaseBookProvider
 from src.providers.registry import register_provider
+from src.utils.browser_downloader import (
+    CAMOUFOX_AVAILABLE,
+    sanitize_filename,
+    download_with_browser,
+)
 
 
 @register_provider
@@ -271,17 +276,72 @@ class PPORTALProvider(BaseBookProvider):
         """
         Download book from Domínio Público.
 
-        Note: Domínio Público requires session cookies, so direct download
-        may not work. Returns the URL for manual download.
-
-        This method is now silent by default to avoid spam. Use verbose mode
-        to see download details.
+        Uses requests first, then falls back to Camoufox browser automation
+        for sites requiring JavaScript/session handling.
         """
         meta = metadata or self.extract_metadata(book_id)
         files = meta.get("files", [])
 
         if not files:
             return None
+
+        download_url = files[0]["url"]
+        ext = files[0].get("format", "pdf")
+        safe_book_id = sanitize_filename(str(book_id))
+        filepath = output_dir / f"{safe_book_id}.{ext}"
+
+        # First try direct download with requests
+        try:
+            response = self.session.get(download_url, timeout=30, allow_redirects=True)
+            if response.status_code == 200 and len(response.content) > 1000:
+                filepath.write_bytes(response.content)
+                print(f"  Downloaded: {meta.get('title', book_id)}")
+                return filepath
+        except Exception:
+            pass
+
+        # Fallback to browser automation if Camoufox available
+        if CAMOUFOX_AVAILABLE:
+            try:
+                result = download_with_browser(
+                    download_url, filepath, headless=True, timeout=60
+                )
+                if result:
+                    print(f"  Downloaded via browser: {meta.get('title', book_id)}")
+                    return result
+            except Exception:
+                pass
+
+        return None
+
+        download_url = files[0]["url"]
+        ext = files[0].get("format", "pdf")
+        safe_book_id = sanitize_filename(str(book_id))
+        filepath = output_path / f"{safe_book_id}.{ext}"
+
+        # First try direct download with requests
+        try:
+            response = self.session.get(download_url, timeout=30, allow_redirects=True)
+            if response.status_code == 200 and len(response.content) > 1000:
+                filepath.write_bytes(response.content)
+                print(f"  Downloaded: {meta.get('title', book_id)}")
+                return filepath
+        except Exception:
+            pass
+
+        # Fallback to browser automation if Camoufox available
+        if CAMOUFOX_AVAILABLE:
+            try:
+                result = BrowserDownloader.download_with_browser(
+                    download_url, filepath, headless=True, timeout=60
+                )
+                if result:
+                    print(f"  Downloaded via browser: {meta.get('title', book_id)}")
+                    return result
+            except Exception:
+                pass
+
+        return None
 
         download_url = files[0]["url"]
 

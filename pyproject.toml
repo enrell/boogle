@@ -17,6 +17,7 @@ dependencies = [
     "zstandard>=0.25.0",
     "sqlalchemy>=2.0.0",
     "alembic>=1.13.0",
+    "camoufox[geoip]>=0.4.11",
 ]
 
 [project.scripts]
