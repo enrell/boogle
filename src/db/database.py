@@ -11,38 +11,41 @@ from src.db.models import Base, Book, SeedOffset
 
 logger = logging.getLogger(__name__)
 
+
 class DatabaseManager:
     """
     SQLAlchemy-based database manager replacing the old manual SQL repository.
     Handles connection lifecycle, sessions, and repository methods.
     """
-    
+
     def __init__(self, dsn: Optional[str] = None, use_sqlite: bool = False):
         self.use_sqlite = use_sqlite or os.getenv("USE_SQLITE", "0") == "1"
         self.url = self._get_db_url(dsn)
-        
+
         # Configure engine
         connect_args = {}
         if self.use_sqlite:
-            connect_args = {"check_same_thread": False}  # Needed for SQLite with threads
-            
+            connect_args = {
+                "check_same_thread": False
+            }  # Needed for SQLite with threads
+
         self.engine = create_engine(
-            self.url, 
+            self.url,
             connect_args=connect_args,
             pool_pre_ping=True,
             # echo=True  # Uncomment for debugging SQL
         )
-        
+
         # Thread-safe session factory
         self.session_factory = sessionmaker(bind=self.engine)
         self.Session = scoped_session(self.session_factory)
-        
+
         # Ensure tables exist (if not using Alembic externally, but strict use suggests Alembic)
-        # We assume Alembic has run. If not, auto-create? 
+        # We assume Alembic has run. If not, auto-create?
         # User said "implement alembic orm as actual choice", implying Alembic manages schema.
         # But for dev convenience/tests:
         if self.use_sqlite:
-             Base.metadata.create_all(self.engine) # Safe for SQLite dev
+            Base.metadata.create_all(self.engine)  # Safe for SQLite dev
 
     def _get_db_url(self, dsn: Optional[str]) -> str:
         if self.use_sqlite:
@@ -50,17 +53,17 @@ class DatabaseManager:
             # Ensure dir exists
             os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
             return f"sqlite:///{db_path}"
-        
+
         if dsn:
             return dsn
-            
+
         url = os.getenv("DATABASE_URL")
         if url:
             # Ensure psycopg driver is used
             if url.startswith("postgresql://"):
                 url = url.replace("postgresql://", "postgresql+psycopg://", 1)
             return url
-            
+
         user = os.getenv("POSTGRES_USER", "boogle")
         password = os.getenv("POSTGRES_PASSWORD", "boogle")
         host = os.getenv("POSTGRES_HOST", "localhost")
@@ -89,14 +92,14 @@ class DatabaseManager:
 
     def upsert_book(self, metadata: Dict) -> None:
         """
-        Insert or Update a book record. 
+        Insert or Update a book record.
         Match on (source, book_id).
         """
         source = metadata.get("source")
         book_id = str(metadata.get("book_id"))
         if not source or not book_id:
             raise ValueError("source and book_id are required")
-            
+
         # Prepare data dict
         data = {
             "source": source,
@@ -115,7 +118,7 @@ class DatabaseManager:
             # 'files' handled by ORM mapping (list -> JSON)
             "files": metadata.get("files") or [],
         }
-        
+
         # Fallback cover URL for Gutenberg
         cover_url = metadata.get("cover_url")
         if not cover_url and source == "gutenberg":
@@ -126,14 +129,13 @@ class DatabaseManager:
             existing = session.execute(
                 select(Book).where(Book.source == source, Book.book_id == book_id)
             ).scalar_one_or_none()
-            
+
             if existing:
                 for key, value in data.items():
                     setattr(existing, key, value)
             else:
                 new_book = Book(**data)
                 session.add(new_book)
-            
 
     def get_book(self, source: str, book_id: str) -> Optional[Dict]:
         """Fetch a book as a dictionary."""
@@ -141,24 +143,42 @@ class DatabaseManager:
             book = session.execute(
                 select(Book).where(Book.source == source, Book.book_id == str(book_id))
             ).scalar_one_or_none()
-            
+
             if book:
                 d = book.to_dict()
                 return d
             return None
 
-    def search_books(self, query: str, limit: int = 10, source: Optional[str] = None) -> List[Dict]:
+    def get_books_by_source(
+        self, source: str, limit: Optional[int] = None, offset: int = 0
+    ) -> List[Dict]:
+        """Fetch all books from a specific source."""
+        with self.get_session() as session:
+            stmt = select(Book).where(Book.source == source).offset(offset)
+            if limit:
+                stmt = stmt.limit(limit)
+            books = session.execute(stmt).scalars().all()
+            return [b.to_dict() for b in books]
+
+    def search_books(
+        self, query: str, limit: int = 10, source: Optional[str] = None
+    ) -> List[Dict]:
         """Search books by title/author substring."""
         term = f"%{query.lower()}%"
-        
-        stmt = select(Book).where(
-            (func.lower(func.coalesce(Book.title, '')).like(term)) | 
-            (func.lower(func.coalesce(Book.author, '')).like(term))
-        ).order_by(Book.title.asc()).limit(limit)
-        
+
+        stmt = (
+            select(Book)
+            .where(
+                (func.lower(func.coalesce(Book.title, "")).like(term))
+                | (func.lower(func.coalesce(Book.author, "")).like(term))
+            )
+            .order_by(Book.title.asc())
+            .limit(limit)
+        )
+
         if source:
             stmt = stmt.where(Book.source == source)
-            
+
         with self.get_session() as session:
             books = session.execute(stmt).scalars().all()
             return [b.to_dict() for b in books]
@@ -168,26 +188,27 @@ class DatabaseManager:
             offset_rec = session.execute(
                 select(SeedOffset).where(SeedOffset.source == source)
             ).scalar_one_or_none()
-            
+
             if offset_rec:
                 return offset_rec.position, offset_rec.last_book_id
             return -1, None
 
-    def update_seed_offset(self, source: str, position: int, last_book_id: Optional[str]) -> None:
+    def update_seed_offset(
+        self, source: str, position: int, last_book_id: Optional[str]
+    ) -> None:
         with self.get_session() as session:
             offset_rec = session.execute(
                 select(SeedOffset).where(SeedOffset.source == source)
             ).scalar_one_or_none()
-            
+
             if offset_rec:
                 offset_rec.position = position
                 offset_rec.last_book_id = last_book_id
             else:
                 new_rec = SeedOffset(
-                    source=source,
-                    position=position,
-                    last_book_id=last_book_id
+                    source=source, position=position, last_book_id=last_book_id
                 )
                 session.add(new_rec)
+
 
 PostgresRepository = DatabaseManager
