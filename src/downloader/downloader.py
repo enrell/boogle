@@ -122,6 +122,10 @@ class BookSeeder:
         """Download a single book using the provider."""
         provider_dir = self.output_dir / provider.source_name
 
+        # In light mode, skip downloads
+        if self.light_mode:
+            return book_id, None, metadata or {}
+
         # Use provider's download method
         try:
             path = provider.download_book(book_id, provider_dir, metadata)
@@ -130,8 +134,8 @@ class BookSeeder:
                 return book_id, path, metadata or {}
             else:
                 return book_id, None, metadata or {}
-        except Exception as e:
-            print(f"Error downloading {book_id} from {provider.source_name}: {e}")
+        except Exception:
+            # Silently fail to avoid spam
             return book_id, None, metadata or {}
 
     def _seed_provider(
