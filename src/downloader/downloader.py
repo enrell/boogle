@@ -145,7 +145,7 @@ class BookSeeder:
         batch_size: int = 500,
     ) -> int:
         """
-        Seed books from a single provider.
+        Seed books from a single provider with concurrent downloads.
 
         Returns number of new books seeded.
         """
@@ -161,6 +161,8 @@ class BookSeeder:
 
         new_books = []
         current_position = position
+        pending_downloads = []
+        downloaded_paths = {}
 
         # Iterate books from provider
         for i, metadata in enumerate(provider.iter_book_metadata(limit=limit)):
@@ -188,20 +190,63 @@ class BookSeeder:
                 current_position = i + 1
                 continue
 
-            # Download book if not in light mode
+            # Queue download if not in light mode
             if not self.light_mode:
-                _, path, _ = self._download_book(provider, book_id, metadata)
-                if path:
-                    metadata["local_path"] = str(path)
+                pending_downloads.append((book_id, metadata))
+            else:
+                new_books.append(metadata)
 
-            # Store metadata
-            new_books.append(metadata)
             current_position = i + 1
 
-            # Update checkpoint periodically
-            if len(new_books) % provider_batch_size == 0:
+            # Process downloads in batches for concurrency
+            if len(pending_downloads) >= provider_batch_size:
+                # Download batch concurrently
+                with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                    futures = {
+                        executor.submit(
+                            self._download_book, provider, book_id, metadata
+                        ): (book_id, metadata)
+                        for book_id, metadata in pending_downloads
+                    }
+
+                    for future in futures:
+                        book_id, metadata = futures[future]
+                        try:
+                            _, path, _ = future.result(timeout=60)
+                            if path:
+                                metadata["local_path"] = str(path)
+                        except Exception:
+                            pass
+                        new_books.append(metadata)
+
+                pending_downloads = []
+
+                # Update checkpoint
                 self._update_provider_offset(provider, current_position, book_id)
                 print(f"  Processed {current_position} books, {len(new_books)} new")
+
+        # Process remaining downloads
+        if pending_downloads:
+            with ThreadPoolExecutor(
+                max_workers=min(self.max_workers, len(pending_downloads))
+            ) as executor:
+                futures = {
+                    executor.submit(self._download_book, provider, book_id, metadata): (
+                        book_id,
+                        metadata,
+                    )
+                    for book_id, metadata in pending_downloads
+                }
+
+                for future in futures:
+                    book_id, metadata = futures[future]
+                    try:
+                        _, path, _ = future.result(timeout=60)
+                        if path:
+                            metadata["local_path"] = str(path)
+                    except Exception:
+                        pass
+                    new_books.append(metadata)
 
         # Final checkpoint update
         if new_books:
