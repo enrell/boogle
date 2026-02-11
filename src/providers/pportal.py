@@ -273,31 +273,32 @@ class PPORTALProvider(BaseBookProvider):
 
         Note: Domínio Público requires session cookies, so direct download
         may not work. Returns the URL for manual download.
+
+        This method is now silent by default to avoid spam. Use verbose mode
+        to see download details.
         """
         meta = metadata or self.extract_metadata(book_id)
         files = meta.get("files", [])
 
         if not files:
-            print(f"No download link available for book {book_id}")
             return None
 
         download_url = files[0]["url"]
-        print(f"Download URL for {book_id}: {download_url}")
-        print(
-            f"Note: Domínio Público requires browser session. Download manually from the URL above."
-        )
 
-        # Try to download anyway
+        # Try to download without verbose output
         try:
             response = self.session.get(download_url, timeout=30, allow_redirects=True)
             if response.status_code == 200 and len(response.content) > 1000:
                 ext = files[0].get("format", "pdf")
-                filepath = output_dir / f"{book_id}.{ext}"
+                # Clean book_id for filename (remove invalid characters)
+                safe_book_id = re.sub(r'[<>:"/\\|?*]', "_", str(book_id))
+                filepath = output_dir / f"{safe_book_id}.{ext}"
                 filepath.write_bytes(response.content)
-                print(f"  Downloaded to {filepath}")
+                print(f"  Downloaded: {meta.get('title', book_id)}")
                 return filepath
-        except Exception as e:
-            print(f"  Download failed: {e}")
+        except Exception:
+            # Silently fail - most PPORTAL books require browser session
+            pass
 
         return None
 
