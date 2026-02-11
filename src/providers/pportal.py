@@ -301,19 +301,39 @@ class PPORTALProvider(BaseBookProvider):
         try:
             response = self.session.get(download_url, timeout=30, allow_redirects=True)
             if response.status_code == 200 and len(response.content) > 1000:
-                pdf_path.write_bytes(response.content)
-                pdf_downloaded = True
+                # Check if it's actually a PDF, not an HTML error page
+                content_start = response.content[:100].lower()
+                is_pdf = content_start.startswith(b"%pdf") or b"pdf" in content_start
+                is_html = content_start.startswith(
+                    b"<!doctype"
+                ) or content_start.startswith(b"<html")
+
+                if is_pdf and not is_html:
+                    pdf_path.write_bytes(response.content)
+                    pdf_downloaded = True
         except Exception:
             pass
 
-        # Fallback to browser if needed
+        # Fallback to browser if direct download failed or returned HTML
         if not pdf_downloaded and CAMOUFOX_AVAILABLE:
             try:
                 result = download_with_browser(
                     download_url, pdf_path, headless=True, timeout=60
                 )
-                if result:
-                    pdf_downloaded = True
+                if result and result.exists():
+                    # Verify it's a real PDF
+                    with open(result, "rb") as f:
+                        header = f.read(100).lower()
+                        is_pdf = header.startswith(b"%pdf") or b"pdf" in header[:10]
+                        is_html = header.startswith(b"<!doctype") or header.startswith(
+                            b"<html"
+                        )
+
+                        if is_pdf and not is_html:
+                            pdf_downloaded = True
+                        else:
+                            # Browser returned HTML, delete it
+                            result.unlink()
             except Exception:
                 pass
 
