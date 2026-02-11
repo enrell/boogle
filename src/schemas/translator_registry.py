@@ -73,7 +73,36 @@ class TranslatorRegistry:
     @classmethod
     def list_providers(cls) -> list:
         """List all registered providers."""
+        cls._auto_discover()
         return list(cls._translator_classes.keys())
+
+    @classmethod
+    def _auto_discover(cls) -> None:
+        """Auto-discover translators from translators package."""
+        import importlib
+        import pkgutil
+        from src.schemas.translator import SchemaTranslator
+
+        try:
+            import src.translators as translators_pkg
+
+            for importer, modname, ispkg in pkgutil.iter_modules(
+                translators_pkg.__path__, translators_pkg.__name__ + "."
+            ):
+                if modname.endswith(("_translator",)):
+                    try:
+                        importlib.import_module(modname)
+                    except Exception as e:
+                        print(
+                            f"Warning: Failed to load translator module {modname}: {e}"
+                        )
+        except ImportError:
+            pass
+
+    @classmethod
+    def auto_discover(cls) -> None:
+        """Public method to trigger auto-discovery."""
+        cls._auto_discover()
 
     @classmethod
     def get_source_quality(cls, provider: str) -> float:

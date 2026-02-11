@@ -30,6 +30,11 @@ package = true
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[dependency-groups]
+dev = [
+    "maturin>=1.10.2",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 

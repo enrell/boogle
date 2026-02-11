@@ -14,14 +14,14 @@ class ContributorInfo(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=500)
     role: str = Field(
-        default="author", regex="^(author|illustrator|editor|translator)$"
+        default="author", pattern="^(author|illustrator|editor|translator)$"
     )
 
 
 class FileInfo(BaseModel):
     """File download information"""
 
-    format: str = Field(..., regex="^(pdf|epub|txt|mobi|html)$")
+    format: str = Field(..., pattern="^(pdf|epub|txt|mobi|html)$")
     url: str = Field(..., max_length=2000)
     size: Optional[str] = None
 
@@ -29,7 +29,7 @@ class FileInfo(BaseModel):
 class SourceInfo(BaseModel):
     """Provider source information"""
 
-    provider: str = Field(..., regex="^[a-z][a-z0-9_]*$")
+    provider: str = Field(..., pattern="^[a-z][a-z0-9_]*$")
     book_id: str = Field(..., max_length=100)
     url: str = Field(..., max_length=2000)
     files: Optional[List[FileInfo]] = None
@@ -60,7 +60,7 @@ class SearchResult(BaseModel):
     authors: Optional[List[ContributorInfo]] = None
 
     # Bibliographic
-    language: Optional[str] = Field(None, regex="^[a-z]{2}$")
+    language: Optional[str] = Field(None, pattern="^[a-z]{2}$")
     subjects: Optional[List[str]] = None
     publication_year: Optional[int] = Field(None, ge=1000, le=2100)
 
@@ -132,7 +132,7 @@ class SearchFilters(BaseModel):
 
     # Subject filters
     subjects: Optional[List[str]] = Field(None, description="Filter by subjects")
-    subject_mode: str = Field(default="any", regex="^(any|all|exact)$")
+    subject_mode: str = Field(default="any", pattern="^(any|all|exact)$")
 
     # Result filters
     deduplicate: bool = Field(default=True)
@@ -186,8 +186,8 @@ class BookDetailResponse(BaseModel):
     copyright_status: Optional[str] = None
     license: Optional[str] = None
 
-    isbn_10: Optional[str] = Field(None, regex=r"^\d{9}[\dX]$")
-    isbn_13: Optional[str] = Field(None, regex=r"^\d{13}$")
+    isbn_10: Optional[str] = Field(None, pattern=r"^\d{9}[\dX]$")
+    isbn_13: Optional[str] = Field(None, pattern=r"^\d{13}$")
 
     rating: Optional[RatingInfo] = None
     popularity: Optional[PopularityInfo] = None
@@ -206,8 +206,8 @@ class BookDetailResponse(BaseModel):
 class HealthResponse(BaseModel):
     """Health check response"""
 
-    status: str = Field(..., regex="^(healthy|unhealthy|degraded)$")
-    mode: str = Field(..., regex="^(batch|realtime|light)$")
+    status: str = Field(..., pattern="^(healthy|unhealthy|degraded)$")
+    mode: str = Field(..., pattern="^(batch|realtime|light)$")
     version: str = "2.0.0"
     providers: List[str] = Field(default_factory=list)
     indexed_books: Optional[int] = None

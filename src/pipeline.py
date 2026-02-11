@@ -381,7 +381,13 @@ def search(
         db.close()
 
 
-def run_api(host: str = "0.0.0.0", port: int = 8000, use_sqlite: bool = False):
+def run_api(
+    host: str = "0.0.0.0",
+    port: int = 8000,
+    use_sqlite: bool = False,
+    light_mode: bool = False,
+    use_nrt: bool = False,
+):
     """Run the REST API."""
     import uvicorn
 
@@ -390,6 +396,14 @@ def run_api(host: str = "0.0.0.0", port: int = 8000, use_sqlite: bool = False):
         print("Starting API in SQLite mode (data/boogle.db)")
     else:
         print("Starting API in PostgreSQL mode")
+
+    if light_mode:
+        os.environ["LIGHT_MODE"] = "1"
+        print("Using metadata-only (light) mode")
+
+    if use_nrt:
+        os.environ["REALTIME_INDEX"] = "1"
+        print("Using RealTimeIndexer")
 
     uvicorn.run("src.api.main:app", host=host, port=port, reload=True)
 
@@ -467,6 +481,16 @@ def main():
     api_parser.add_argument("--host", default="0.0.0.0")
     api_parser.add_argument("--port", type=int, default=8000)
     api_parser.add_argument("--sqlite", action="store_true", help="Use SQLite")
+    api_parser.add_argument(
+        "--light-mode",
+        action="store_true",
+        help="Use metadata-only index (no full text)",
+    )
+    api_parser.add_argument(
+        "--nrt",
+        action="store_true",
+        help="Use RealTimeIndexer",
+    )
 
     args = parser.parse_args()
 
@@ -488,7 +512,7 @@ def main():
     elif args.command == "search":
         search(args.query, args.top_k, args.sqlite, args.light_mode)
     elif args.command == "api":
-        run_api(args.host, args.port, args.sqlite)
+        run_api(args.host, args.port, args.sqlite, args.light_mode, args.nrt)
 
 
 if __name__ == "__main__":
