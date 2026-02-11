@@ -19,6 +19,7 @@ from src.services.cross_reference import CrossReferenceService
 
 
 _local = threading.local()
+_db_lock = threading.Lock()
 
 
 def _get_session() -> requests.Session:
@@ -31,6 +32,13 @@ def _get_session() -> requests.Session:
             }
         )
     return _local.session
+
+
+def _get_thread_db(use_sqlite: bool) -> PostgresRepository:
+    """Get thread-local database connection."""
+    if not hasattr(_local, "db") or _local.db is None:
+        _local.db = PostgresRepository(use_sqlite=use_sqlite)
+    return _local.db
 
 
 class BookSeeder:
@@ -66,7 +74,8 @@ class BookSeeder:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.max_workers = max_workers
-        self.db = PostgresRepository(use_sqlite=use_sqlite)
+        self._use_sqlite = use_sqlite
+        self._main_db = PostgresRepository(use_sqlite=use_sqlite)
         self.light_mode = light_mode
         self.cross_reference_service = CrossReferenceService()
 
@@ -74,6 +83,14 @@ class BookSeeder:
         for provider in providers:
             provider_dir = self.output_dir / provider.source_name
             provider_dir.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def db(self) -> PostgresRepository:
+        """Get database connection (thread-local in parallel mode)."""
+        # Check if we're in a worker thread by looking for thread-local db
+        if hasattr(_local, "db") and _local.db is not None:
+            return _local.db
+        return self._main_db
 
     def _get_provider_offset(
         self, provider: BaseBookProvider
@@ -239,11 +256,46 @@ class BookSeeder:
 
         return len(merged)
 
+    def _seed_provider_parallel(
+        self,
+        provider: BaseBookProvider,
+        limit: Optional[int] = None,
+        batch_size: int = 500,
+        cross_reference: bool = True,
+    ) -> tuple[str, int]:
+        """Seed from a single provider (for parallel execution)."""
+        # Initialize thread-local database connection
+        _local.db = PostgresRepository(use_sqlite=self._use_sqlite)
+
+        try:
+            count = self._seed_provider(provider, limit=limit, batch_size=batch_size)
+
+            # Cross-reference if enabled and we found new books
+            if cross_reference and count > 0:
+                try:
+                    self._cross_reference_provider_books(provider)
+                except Exception as e:
+                    print(
+                        f"Warning: Cross-reference failed for {provider.source_name}: {e}"
+                    )
+
+            return provider.source_name, count
+        except Exception as e:
+            print(f"Error seeding from {provider.source_name}: {e}")
+            return provider.source_name, 0
+        finally:
+            # Clean up thread-local database connection
+            if hasattr(_local, "db") and _local.db is not None:
+                _local.db.close()
+                _local.db = None
+
     def seed_all(
         self,
         limit: Optional[int] = None,
         batch_size: int = 500,
         cross_reference: bool = True,
+        parallel: bool = True,
+        max_parallel_providers: int = 4,
     ) -> dict:
         """
         Seed books from all providers.
@@ -252,6 +304,8 @@ class BookSeeder:
             limit: Maximum books per provider (None = all)
             batch_size: Batch size for checkpointing
             cross_reference: Whether to cross-reference after each provider
+            parallel: Whether to seed providers in parallel
+            max_parallel_providers: Max number of providers to seed simultaneously
 
         Returns:
             Dict mapping provider name to number of books seeded
@@ -262,30 +316,35 @@ class BookSeeder:
         print(f"\n{'=' * 60}")
         print(f"Seeding from {len(self.providers)} providers")
         print(f"Providers: {[p.source_name for p in self.providers]}")
+        print(f"Parallel: {parallel} (max {max_parallel_providers})")
         print(f"{'=' * 60}")
 
-        for provider in self.providers:
-            try:
-                # Seed new books from this provider
-                count = self._seed_provider(
-                    provider, limit=limit, batch_size=batch_size
+        if parallel and len(self.providers) > 1:
+            # Parallel provider seeding
+            with ThreadPoolExecutor(max_workers=max_parallel_providers) as executor:
+                futures = {
+                    executor.submit(
+                        self._seed_provider_parallel,
+                        provider,
+                        limit,
+                        batch_size,
+                        cross_reference,
+                    ): provider
+                    for provider in self.providers
+                }
+
+                for future in as_completed(futures):
+                    provider_name, count = future.result()
+                    results[provider_name] = count
+                    total_new += count
+        else:
+            # Sequential provider seeding
+            for provider in self.providers:
+                provider_name, count = self._seed_provider_parallel(
+                    provider, limit, batch_size, cross_reference
                 )
-                results[provider.source_name] = count
+                results[provider_name] = count
                 total_new += count
-
-                # Cross-reference if enabled and we found new books
-                if cross_reference and count > 0:
-                    try:
-                        self._cross_reference_provider_books(provider)
-                    except Exception as e:
-                        print(
-                            f"Warning: Cross-reference failed for {provider.source_name}: {e}"
-                        )
-
-            except Exception as e:
-                print(f"Error seeding from {provider.source_name}: {e}")
-                results[provider.source_name] = 0
-                continue
 
         print(f"\n{'=' * 60}")
         print(f"Seeding complete: {total_new} total new books")

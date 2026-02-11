@@ -1,8 +1,12 @@
+use crate::analysis::analyze;
 use crate::index::ram::{Document, RamIndex};
+use crate::index::segment::{BatchData, IndexMeta, ProcessedDoc, SegmentMeta};
 use crate::index::wal::Wal;
+use crate::index::writer::write_segment;
 use crate::search::searcher::FileSearcher;
 use pyo3::prelude::*;
 use std::cmp::Ordering;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -88,8 +92,101 @@ impl RealTimeIndexer {
         }
 
         let count = mem.docs.len() as u32;
+
+        // Get current disk index info for base_doc_id
+        let base_doc_id = {
+            let disk = self.disk_index.read().unwrap();
+            disk.num_docs()
+        };
+
+        // Convert memory documents to ProcessedDoc format
+        let docs: Vec<ProcessedDoc> = mem
+            .docs
+            .values()
+            .map(|doc| {
+                let tokens = analyze(&doc.content);
+                let doc_length = tokens.len() as u32;
+
+                // Build frequency map
+                let mut term_freqs: rustc_hash::FxHashMap<String, u32> =
+                    rustc_hash::FxHashMap::default();
+                for token in tokens {
+                    *term_freqs.entry(token).or_insert(0) += 1;
+                }
+
+                // Create a single chunk for the document
+                let chunks = vec![(doc_length, term_freqs)];
+
+                ProcessedDoc {
+                    book_id: doc.metadata.clone(), // Use metadata as book_id
+                    chunks,
+                }
+            })
+            .collect();
+
+        // Read current index meta to get segment count
+        let index_path = PathBuf::from(&self.index_dir);
+        let meta_path = index_path.join("index.json");
+
+        let mut meta: IndexMeta = fs::read_to_string(&meta_path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or(IndexMeta {
+                segments: vec![],
+                total_docs: base_doc_id,
+                avgdl: 0.0,
+            });
+
+        let segment_id = meta.segments.len();
+        let segment_name = format!("segment_{}", segment_id);
+        let segment_dir = index_path.join(&segment_name);
+
+        // Create BatchData for the segment
+        let batch_data = BatchData {
+            segment_id,
+            segment_dir: segment_dir.clone(),
+            docs,
+            base_doc_id,
+        };
+
+        // Write the segment
+        let segment_meta = write_segment(batch_data).map_err(|e| {
+            pyo3::exceptions::PyIOError::new_err(format!("Failed to write segment: {}", e))
+        })?;
+
+        // Update index meta
+        meta.segments.push(segment_name);
+        meta.total_docs += segment_meta.num_docs;
+        meta.avgdl = if meta.total_docs > 0 {
+            (base_doc_id as f32 + count as f32) / meta.total_docs as f32
+        } else {
+            0.0
+        };
+
+        fs::write(
+            &meta_path,
+            serde_json::to_string(&meta).map_err(|e| {
+                pyo3::exceptions::PyIOError::new_err(format!("Failed to serialize meta: {}", e))
+            })?,
+        )
+        .map_err(|e| {
+            pyo3::exceptions::PyIOError::new_err(format!("Failed to write meta: {}", e))
+        })?;
+
+        // Clear memory index
         mem.clear();
 
+        // Reload disk index
+        let new_disk = FileSearcher::new(&self.index_dir).map_err(|e| {
+            pyo3::exceptions::PyIOError::new_err(format!("Failed to reload index: {}", e))
+        })?;
+
+        {
+            let mut disk = self.disk_index.write().unwrap();
+            *disk = new_disk;
+        }
+
+        // Truncate WAL
         self.wal
             .lock()
             .unwrap()
