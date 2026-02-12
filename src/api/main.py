@@ -182,15 +182,48 @@ async def search_books(
     query: str = Query(..., min_length=1, max_length=1000),
     limit: int = Query(10, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    # Filters
-    sources: Optional[List[str]] = Query(None, description="Filter by providers"),
-    languages: Optional[List[str]] = Query(
-        None, description="Filter by language codes"
+    # Provider filters
+    sources: Optional[List[str]] = Query(
+        None, description="Filter by providers (e.g., gutenberg, openlibrary, pportal)"
     ),
-    year_from: Optional[int] = Query(None, ge=1000, le=2100),
-    year_to: Optional[int] = Query(None, ge=1000, le=2100),
-    subjects: Optional[List[str]] = Query(None, description="Filter by subjects"),
-    min_completeness: float = Query(0.0, ge=0.0, le=1.0),
+    exclude_sources: Optional[List[str]] = Query(
+        None, description="Exclude specific providers"
+    ),
+    # Content filters
+    languages: Optional[List[str]] = Query(
+        None, description="Filter by language codes (ISO 639-1, e.g., en, pt, es)"
+    ),
+    formats: Optional[List[str]] = Query(
+        None, description="Filter by available formats (txt, epub, pdf, html)"
+    ),
+    has_fulltext: Optional[bool] = Query(
+        None, description="Only books with downloadable full text"
+    ),
+    # Quality filters
+    min_completeness: float = Query(
+        0.0, ge=0.0, le=1.0, description="Minimum metadata completeness (0.0-1.0)"
+    ),
+    min_rating: float = Query(
+        0.0, ge=0.0, le=5.0, description="Minimum rating (0.0-5.0)"
+    ),
+    # Temporal filters
+    year_from: Optional[int] = Query(
+        None, ge=1000, le=2100, description="Minimum publication year"
+    ),
+    year_to: Optional[int] = Query(
+        None, ge=1000, le=2100, description="Maximum publication year"
+    ),
+    # Subject filters
+    subjects: Optional[List[str]] = Query(
+        None, description="Filter by subjects/categories"
+    ),
+    subject_mode: str = Query(
+        "any", description="Subject matching mode: any, all, or exact"
+    ),
+    # Result filters
+    deduplicate: bool = Query(
+        True, description="Remove duplicate books across providers"
+    ),
 ):
     """
     Search books with filters and NLP enhancements.
@@ -281,14 +314,17 @@ async def search_books(
     # Build search filters
     filters = SearchFilters(
         sources=sources,
+        exclude_sources=exclude_sources,
         languages=languages,
+        formats=formats,
+        has_fulltext=has_fulltext,
+        min_completeness=min_completeness,
+        min_rating=min_rating,
         year_from=year_from,
         year_to=year_to,
         subjects=subjects,
-        min_completeness=min_completeness,
-        exclude_sources=None,
-        formats=None,
-        has_fulltext=None,
+        subject_mode=subject_mode,
+        deduplicate=deduplicate,
     )
 
     results = []
@@ -346,19 +382,73 @@ def _database_search(
     query: str, limit: int, offset: int, filters: SearchFilters
 ) -> List[SearchResult]:
     """Fallback database search."""
-    books = database.search_books(query, limit=limit * 2)
+    books = database.search_books(query, limit=limit * 10)  # Get more for filtering
 
     results = []
-    for book in books[offset : offset + limit]:
-        # Apply filters
-        if filters.sources and book.get("source") not in filters.sources:
+    skipped = 0
+
+    for book in books:
+        if len(results) >= limit:
+            break
+
+        # Skip if before offset
+        if skipped < offset:
+            skipped += 1
             continue
+
+        # Apply filters
+        source = book.get("source", "unknown")
+
+        # Provider filters
+        if filters.sources and source not in filters.sources:
+            continue
+        if filters.exclude_sources and source in filters.exclude_sources:
+            continue
+
+        # Content filters
         if filters.languages and book.get("language") not in filters.languages:
             continue
+
+        # Temporal filters
         if filters.year_from and book.get("publication_year", 0) < filters.year_from:
             continue
         if filters.year_to and book.get("publication_year", 9999) > filters.year_to:
             continue
+
+        # Subject filters
+        if filters.subjects:
+            book_subjects = book.get("subjects") or []
+            if isinstance(book_subjects, str):
+                book_subjects = [book_subjects]
+            elif not isinstance(book_subjects, list):
+                book_subjects = []
+            if filters.subject_mode == "any":
+                if not any(subj in book_subjects for subj in filters.subjects):
+                    continue
+            elif filters.subject_mode == "all":
+                if not all(subj in book_subjects for subj in filters.subjects):
+                    continue
+
+        # Quality filters
+        if filters.min_completeness > 0.0:
+            completeness = book.get("metadata_completeness", 0.0)
+            if isinstance(completeness, str):
+                try:
+                    completeness = float(completeness)
+                except:
+                    completeness = 0.0
+            if completeness < filters.min_completeness:
+                continue
+
+        if filters.min_rating > 0.0:
+            rating = book.get("ratings_average") or 0.0
+            if isinstance(rating, str):
+                try:
+                    rating = float(rating)
+                except:
+                    rating = 0.0
+            if rating < filters.min_rating:
+                continue
 
         results.append(_build_search_result(book, 1.0))
 
@@ -387,14 +477,80 @@ def _process_search_results(
             continue
 
         # Apply filters
-        if filters.sources and meta.get("source") not in filters.sources:
+        source = meta.get("source", "unknown")
+
+        # Provider filters
+        if filters.sources and source not in filters.sources:
             continue
+        if filters.exclude_sources and source in filters.exclude_sources:
+            continue
+
+        # Content filters
         if filters.languages and meta.get("language") not in filters.languages:
             continue
+
+        # Temporal filters
         if filters.year_from and meta.get("publication_year", 0) < filters.year_from:
             continue
         if filters.year_to and meta.get("publication_year", 9999) > filters.year_to:
             continue
+
+        # Subject filters
+        if filters.subjects:
+            book_subjects = meta.get("subjects") or []
+            if isinstance(book_subjects, str):
+                book_subjects = [book_subjects]
+            elif not isinstance(book_subjects, list):
+                book_subjects = []
+
+            if filters.subject_mode == "any":
+                # At least one subject must match
+                if not any(subj in book_subjects for subj in filters.subjects):
+                    continue
+            elif filters.subject_mode == "all":
+                # All subjects must be present
+                if not all(subj in book_subjects for subj in filters.subjects):
+                    continue
+            elif filters.subject_mode == "exact":
+                # Exact match (same subjects in any order)
+                if set(book_subjects) != set(filters.subjects):
+                    continue
+
+        # Quality filters
+        if filters.min_completeness > 0.0:
+            completeness = meta.get("metadata_completeness", 0.0)
+            if isinstance(completeness, str):
+                try:
+                    completeness = float(completeness)
+                except:
+                    completeness = 0.0
+            if completeness < filters.min_completeness:
+                continue
+
+        if filters.min_rating > 0.0:
+            rating = meta.get("ratings_average") or 0.0
+            if isinstance(rating, str):
+                try:
+                    rating = float(rating)
+                except:
+                    rating = 0.0
+            if rating < filters.min_rating:
+                continue
+
+        # Format filters
+        if filters.formats:
+            files = meta.get("files", []) or []
+            available_formats = [f.get("format", "").lower() for f in files]
+            if not any(fmt.lower() in available_formats for fmt in filters.formats):
+                continue
+
+        # Full-text filter
+        if filters.has_fulltext is not None:
+            has_text = bool(meta.get("files"))
+            if filters.has_fulltext and not has_text:
+                continue
+            if not filters.has_fulltext and has_text:
+                continue
 
         # Use canonical_id for deduplication
         canonical_id = meta.get("canonical_id", f"{meta['source']}:{book_id}")
