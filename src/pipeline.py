@@ -29,6 +29,57 @@ from src.enrichment.openlibrary import OpenLibraryClient
 from src.enrichment.service import enrich_books_service
 
 
+def _cleanup_source_files(books_dir: str, keep_books: bool = False):
+    """
+    Clean up downloaded source files after indexing.
+
+    When keep_books=False (default), deletes source .txt/.pdf/.epub files
+    from books_dir while preserving the directory structure.
+
+    The compressed chunks in data/chunks/ are preserved for search.
+
+    Args:
+        books_dir: Directory containing downloaded books
+        keep_books: If True, skip cleanup and keep source files
+    """
+    if keep_books:
+        print(f"  Keeping source files (--keep-books)")
+        return
+
+    from pathlib import Path
+    import glob
+
+    books_path = Path(books_dir)
+    if not books_path.exists():
+        return
+
+    # Count files before deletion
+    deleted_count = 0
+    bytes_freed = 0
+
+    # Delete source files (txt, pdf, epub)
+    for pattern in ["**/*.txt", "**/*.pdf", "**/*.epub"]:
+        for file_path in books_path.glob(pattern):
+            try:
+                bytes_freed += file_path.stat().st_size
+                file_path.unlink()
+                deleted_count += 1
+            except Exception as e:
+                print(f"  Warning: Could not delete {file_path}: {e}")
+
+    # Remove empty directories
+    for dir_path in sorted(books_path.rglob("*"), reverse=True):
+        if dir_path.is_dir() and not any(dir_path.iterdir()):
+            try:
+                dir_path.rmdir()
+            except:
+                pass
+
+    mb_freed = bytes_freed / (1024 * 1024)
+    print(f"  Deleted {deleted_count} source files, freed {mb_freed:.1f} MB")
+    print(f"  Compressed chunks preserved in data/chunks/")
+
+
 def get_providers(provider_names: Optional[List[str]] = None) -> List[BaseBookProvider]:
     """
     Get list of providers to index.
@@ -70,6 +121,7 @@ def run_index_pipeline(
     providers: Optional[List[str]] = None,
     use_nrt: bool = False,
     cross_reference: bool = True,
+    keep_books: bool = False,
 ):
     """
     Run the complete indexing pipeline.
@@ -94,6 +146,7 @@ def run_index_pipeline(
         providers: Specific providers to index (None = all enabled)
         use_nrt: Use RealTimeIndexer for incremental updates
         cross_reference: Cross-reference after each provider
+        keep_books: Keep downloaded source files after indexing (default: False)
     """
     books_dir = os.getenv("BOOKS_DIR", "data/books")
     index_dir = os.getenv("INDEX_DIR", "data/index")
@@ -302,6 +355,12 @@ def run_index_pipeline(
         )
 
         print(f"Batch indexing complete: {indexed} books, {total_chunks} chunks")
+
+        # Clean up source files if not keeping books
+        if not keep_books and not light_mode:
+            print(f"\nCleaning up source files (keep_books=False)...")
+            _cleanup_source_files(books_dir, keep_books)
+
         return indexed
 
 
@@ -464,6 +523,11 @@ def main():
         action="store_true",
         help="Skip cross-reference merging",
     )
+    idx_parser.add_argument(
+        "--keep-books",
+        action="store_true",
+        help="Keep downloaded source files after indexing (default: delete to save space)",
+    )
 
     # Search command
     search_parser = subparsers.add_parser("search", help="Search the index")
@@ -508,6 +572,7 @@ def main():
             providers=args.providers,
             use_nrt=args.nrt,
             cross_reference=not args.no_cross_reference,
+            keep_books=args.keep_books,
         )
     elif args.command == "search":
         search(args.query, args.top_k, args.sqlite, args.light_mode)
