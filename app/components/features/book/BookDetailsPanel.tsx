@@ -83,7 +83,13 @@ export function BookDetailsPanel({ book, isLoading, onClose }: BookDetailsPanelP
     return { provider: parts[0], bookId: parts.slice(1).join(':') };
   })();
   
-  const displayFiles = uniqueFiles;
+  // For Gutenberg books, add HTML reader URL if not present
+  const hasHtml = uniqueFiles.some(f => f.format?.toLowerCase() === 'html');
+  const gutenbergHtmlFile = (provider === 'gutenberg' && !hasHtml)
+    ? [{ format: 'html', url: `https://www.gutenberg.org/files/${bookId}/${bookId}-h/${bookId}-h.htm` }]
+    : [];
+  
+  const displayFiles = [...uniqueFiles, ...gutenbergHtmlFile];
   
   const primaryUrl = book.primary_source?.url || "#";
   const sourceProvider = book.primary_source?.provider || "Unknown";

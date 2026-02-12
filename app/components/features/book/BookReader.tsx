@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { IoClose, IoChevronBack, IoChevronForward } from 'react-icons/io5';
+import { IoClose, IoChevronBack } from 'react-icons/io5';
 
 interface BookReaderProps {
   url: string;
@@ -13,16 +13,8 @@ export function BookReader({ url, format, title, onClose }: BookReaderProps) {
   const [totalPages, setTotalPages] = useState(0);
 
   const getEmbedUrl = () => {
-    switch (format) {
-      case 'pdf':
-        // Use Google Docs viewer for PDFs (more reliable than direct embedding)
-        return `https://docs.google.com/gview?embedded=1&url=${encodeURIComponent(url)}`;
-      case 'html':
-      case 'txt':
-        return url;
-      default:
-        return url;
-    }
+    // For all formats, open directly (HTML works best in iframe)
+    return url;
   };
 
   if (format === 'epub') {
@@ -101,26 +93,13 @@ export function BookReader({ url, format, title, onClose }: BookReaderProps) {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-hidden">
-        {format === 'pdf' ? (
-          <iframe
-            src={getEmbedUrl()}
-            className="w-full h-full"
-            title={`Reader - ${title}`}
-            allow="fullscreen"
-          />
-        ) : format === 'html' || format === 'txt' ? (
-          <iframe
-            src={url}
-            className="w-full h-full bg-white"
-            title={`Reader - ${title}`}
-            sandbox="allow-same-origin allow-scripts"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-white">
-            <p>Preview not available for this format</p>
-          </div>
-        )}
+      <div className="flex-1 overflow-hidden bg-white">
+        <iframe
+          src={getEmbedUrl()}
+          className="w-full h-full"
+          title={`Reader - ${title}`}
+          sandbox="allow-same-origin allow-scripts"
+        />
       </div>
 
       {/* Footer with download */}
