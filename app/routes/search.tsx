@@ -191,7 +191,7 @@ export default function Search() {
               </div>
             )}
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 pb-10">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 pb-10 px-2">
               {results.map((book) => {
                 // Use enhanced cover from OpenLibrary search if available
                 const enhancedCover = enhancedCovers[book.canonical_id];
@@ -205,7 +205,7 @@ export default function Search() {
                 return (
                   <article
                     key={book.canonical_id}
-                    className="group bg-white dark:bg-boogle-dark-lighter border border-gray-200 dark:border-white/10 rounded-xl shadow-sm hover:shadow-lg transition-all duration-200 overflow-hidden cursor-pointer flex flex-col"
+                    className="group relative bg-white dark:bg-boogle-dark-lighter border border-gray-200 dark:border-white/10 rounded-2xl shadow-sm hover:shadow-xl transition-all duration-300 overflow-hidden cursor-pointer flex flex-col"
                     onClick={(e) => handleBookClick(e as any, book.canonical_id)}
                   >
                     {/* Cover Image */}
@@ -214,45 +214,52 @@ export default function Search() {
                         <CachedImage
                           src={coverUrl}
                           alt={`Cover of ${book.title}`}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                         />
                       ) : (
-                        <div className="w-full h-full flex flex-col items-center justify-center text-gray-400 dark:text-gray-600 p-4">
-                          <svg className="w-12 h-12 mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <div className="w-full h-full flex flex-col items-center justify-center text-gray-400 dark:text-gray-600 p-6">
+                          <svg className="w-16 h-16 mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                           </svg>
-                          <span className="text-xs text-center">{t('no_preview')}</span>
+                          <span className="text-xs text-center opacity-70">{t('no_preview')}</span>
                         </div>
                       )}
                       
-                      {/* Source Badge */}
-                      <div className="absolute top-2 right-2">
-                        <span className="text-xs bg-black/50 text-white px-2 py-1 rounded-full backdrop-blur-sm">
+                      {/* Source Badge - positioned better */}
+                      <div className="absolute top-3 left-3">
+                        <span className="text-[10px] font-medium bg-black/60 text-white px-2 py-1 rounded-md backdrop-blur-sm uppercase tracking-wide">
                           {book.primary_source?.provider || 'unknown'}
                         </span>
+                      </div>
+                      
+                      {/* Hover overlay with View button */}
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all duration-300 flex items-center justify-center">
+                        <button className="opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-white text-gray-900 px-4 py-2 rounded-full text-sm font-medium shadow-lg transform translate-y-4 group-hover:translate-y-0 transition-transform">
+                          {t('view_details')}
+                        </button>
                       </div>
                     </div>
 
                     {/* Book Info */}
-                    <div className="p-3 flex flex-col flex-1">
-                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1 line-clamp-2 leading-tight">
+                    <div className="p-4 flex flex-col flex-1 bg-white dark:bg-boogle-dark-lighter">
+                      <h3 className="text-sm font-bold text-gray-900 dark:text-white mb-2 line-clamp-2 leading-snug min-h-[2.5rem]">
                         {book.title || "Untitled"}
                       </h3>
-                      <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-1 mb-2">
+                      <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-1 mb-3">
                         {authorString}
                       </p>
                       
-                      {/* Year and Language */}
+                      {/* Year and Language with better styling */}
                       {(book.publication_year || book.language) && (
-                        <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-500 mt-auto">
+                        <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-500 mt-auto pt-2 border-t border-gray-100 dark:border-white/5">
                           {book.publication_year && (
-                            <span>{book.publication_year}</span>
+                            <span className="font-medium">{book.publication_year}</span>
                           )}
                           {book.publication_year && book.language && (
-                            <span>·</span>
+                            <span className="text-gray-300">|</span>
                           )}
                           {book.language && (
-                            <span className="uppercase">{book.language}</span>
+                            <span className="uppercase font-medium text-gray-400">{book.language}</span>
                           )}
                         </div>
                       )}
