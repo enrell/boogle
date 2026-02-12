@@ -67,15 +67,9 @@ export function BookDetailsPanel({ book, isLoading, onClose }: BookDetailsPanelP
     ...(book.all_sources?.flatMap(s => s.files || []) || [])
   ];
   
-  // Filter out invalid entries:
-  // - null/undefined files
-  // - files without URLs
-  // - files with format "none" or null
+  // Filter: must have URL and format
   const validFiles = allFiles.filter(file => {
-    if (!file || !file.url) return false;
-    const format = file.format?.toLowerCase();
-    if (!format || format === 'none' || format === 'null' || format === 'undefined') return false;
-    return true;
+    return file && file.url && file.format;
   });
   
   // Remove duplicates based on URL
