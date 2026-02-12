@@ -67,29 +67,29 @@ export function BookDetailsPanel({ book, isLoading, onClose }: BookDetailsPanelP
     ...(book.all_sources?.flatMap(s => s.files || []) || [])
   ];
   
-  // Remove duplicates based on URL and filter out invalid entries
-  const uniqueFiles = allFiles
-    .filter(file => file && file.url) // Filter out null/undefined entries
-    .filter((file, index, self) =>
-      index === self.findIndex(f => f.url === file.url)
-    );
+  // Filter out invalid entries:
+  // - null/undefined files
+  // - files without URLs
+  // - files with format "none" or null
+  const validFiles = allFiles.filter(file => {
+    if (!file || !file.url) return false;
+    const format = file.format?.toLowerCase();
+    if (!format || format === 'none' || format === 'null' || format === 'undefined') return false;
+    return true;
+  });
   
-  // For Gutenberg books, if no files are provided, generate them
+  // Remove duplicates based on URL
+  const uniqueFiles = validFiles.filter((file, index, self) =>
+    index === self.findIndex(f => f.url === file.url)
+  );
+  
+  // Parse provider and book ID
   const { provider, bookId } = (() => {
     const parts = book.canonical_id.split(':');
     return { provider: parts[0], bookId: parts.slice(1).join(':') };
   })();
   
-  const gutenbergFiles = provider === 'gutenberg' && allFiles.filter(f => f && f.url).length === 0
-    ? [
-        { format: 'html', url: `https://www.gutenberg.org/files/${bookId}/${bookId}-h/${bookId}-h.htm` },
-        { format: 'txt', url: `https://www.gutenberg.org/files/${bookId}/${bookId}-0.txt` },
-        { format: 'epub', url: `https://www.gutenberg.org/ebooks/${bookId}.epub` },
-        { format: 'pdf', url: `https://www.gutenberg.org/ebooks/${bookId}.pdf` },
-      ]
-    : [];
-  
-  const displayFiles = [...uniqueFiles, ...gutenbergFiles];
+  const displayFiles = uniqueFiles;
   
   const primaryUrl = book.primary_source?.url || "#";
   const sourceProvider = book.primary_source?.provider || "Unknown";
