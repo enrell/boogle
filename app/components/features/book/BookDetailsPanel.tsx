@@ -28,13 +28,22 @@ export function BookDetailsPanel({ book, isLoading, onClose }: BookDetailsPanelP
     );
   }
 
-  // Get files from primary source
-  const files = book.primary_source?.files || [];
+  // Get files from ALL sources, not just primary
+  const allFiles = [
+    ...(book.primary_source?.files || []),
+    ...(book.all_sources?.flatMap(s => s.files || []) || [])
+  ];
+  
+  // Remove duplicates based on URL
+  const uniqueFiles = allFiles.filter((file, index, self) =>
+    index === self.findIndex(f => f.url === file.url)
+  );
+  
   const primaryUrl = book.primary_source?.url || "#";
   const sourceProvider = book.primary_source?.provider || "Unknown";
 
   // Use cover_url if available, otherwise find cover image in files
-  const coverImage = book.cover_url || book.thumbnail_url || files.find(f =>
+  const coverImage = book.cover_url || book.thumbnail_url || uniqueFiles.find(f =>
     f.format.toLowerCase().includes("image") ||
     f.url.toLowerCase().endsWith(".jpg") ||
     f.url.toLowerCase().endsWith(".png") ||
@@ -42,23 +51,33 @@ export function BookDetailsPanel({ book, isLoading, onClose }: BookDetailsPanelP
   )?.url;
 
   // Find the "Read now!" or HTML/TXT link for reading
-  const readNowFile = files.find(f =>
+  const readNowFile = uniqueFiles.find(f =>
     f.format.toLowerCase().includes("html") ||
     f.format.toLowerCase().includes("txt") ||
     f.format.toLowerCase().includes("read")
   );
 
   // Find PDF for preview
-  const pdfFile = files.find(f =>
+  const pdfFile = uniqueFiles.find(f =>
     f.format.toLowerCase().includes("pdf")
   );
 
-  // Get downloadable files (exclude images)
-  const downloadFiles = files.filter(f =>
-    !f.format.toLowerCase().includes("image") &&
-    !f.url.toLowerCase().endsWith(".jpg") &&
-    !f.url.toLowerCase().endsWith(".png")
-  );
+  // Get downloadable files - show all unique formats
+  const downloadFiles = uniqueFiles.filter(f => {
+    // Include if it has a URL and format
+    if (!f.url || !f.format) return false;
+    
+    // Exclude image files
+    const isImage = 
+      f.format.toLowerCase().includes("image") ||
+      f.url.toLowerCase().endsWith(".jpg") ||
+      f.url.toLowerCase().endsWith(".png") ||
+      f.url.toLowerCase().endsWith(".jpeg") ||
+      f.url.toLowerCase().endsWith(".gif") ||
+      f.url.toLowerCase().endsWith(".webp");
+    
+    return !isImage;
+  });
 
   // Build author string from authors array
   const authorString = book.authors?.length
