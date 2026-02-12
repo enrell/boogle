@@ -9,7 +9,7 @@ mod search;
 
 use analysis::analyze;
 use codecs::{decode_postings, encode_postings, merge_postings};
-use document::parsers::{chunk_text, file_hashes_batch, parse_epub, parse_pdf, parse_txt};
+use document::parsers::{chunk_text, chunk_by_structure, chunk_text_semantic, file_hashes_batch, parse_epub, parse_pdf, parse_txt};
 use index::memory::{process_batch, process_books_to_index, BM25Index};
 use index::realtime::RealTimeIndexer;
 use index::writer::index_corpus_file;
@@ -31,6 +31,8 @@ fn rust_bm25(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_pdf, m)?)?;
     m.add_function(wrap_pyfunction!(parse_txt, m)?)?;
     m.add_function(wrap_pyfunction!(chunk_text, m)?)?;
+    m.add_function(wrap_pyfunction!(chunk_text_semantic, m)?)?;
+    m.add_function(wrap_pyfunction!(chunk_by_structure, m)?)?;
     m.add_function(wrap_pyfunction!(process_books_to_index, m)?)?;
     m.add_function(wrap_pyfunction!(process_batch, m)?)?;
     m.add_function(wrap_pyfunction!(file_hashes_batch, m)?)?;
