@@ -187,6 +187,7 @@ class GutenbergProvider(BaseBookProvider):
                         metadata["downloads"] = value
 
         # Extract file links and normalize format names
+        # Only include formats that match API pattern: pdf, epub, txt, mobi, html
         format_map = {
             "plain text": "txt",
             "txt": "txt",
@@ -215,9 +216,10 @@ class GutenbergProvider(BaseBookProvider):
                             if isinstance(href, str) and href.startswith("http")
                             else f"{self.base_url}{href}"
                         )
-                        # Normalize format name
-                        fmt = format_map.get(text, text)
-                        metadata["files"].append({"format": fmt, "url": full_url})
+                        # Normalize format name - only include valid formats
+                        fmt = format_map.get(text)
+                        if fmt:  # Skip if not a recognized format (e.g., "read now!")
+                            metadata["files"].append({"format": fmt, "url": full_url})
 
         return metadata
 
