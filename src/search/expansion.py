@@ -2,6 +2,7 @@
 Query expansion using WordNet synonyms and related terms.
 
 Expands user queries with synonyms to improve recall.
+Supports multiple languages using stopwords-iso.json.
 """
 
 import os
@@ -16,6 +17,7 @@ class QueryExpander:
 
     Uses NLTK WordNet for English synonyms.
     Can be extended with other language WordNets.
+    Supports 50+ languages via stopwords-iso.json.
     """
 
     def __init__(self, max_expansions: int = 3, min_word_length: int = 4):
@@ -29,7 +31,7 @@ class QueryExpander:
         self.max_expansions = max_expansions
         self.min_word_length = min_word_length
         self._wordnet = None
-        self._stopwords = None
+        self._stopwords_cache: Dict[str, Set[str]] = {}
 
         # Language-specific expanders
         self.lang_expanders: Dict[str, callable] = {
@@ -56,22 +58,29 @@ class QueryExpander:
                 return None
         return self._wordnet
 
-    def _get_stopwords(self) -> Set[str]:
-        """Get English stopwords."""
-        if self._stopwords is None:
+    def _get_stopwords(self, lang: str = "en") -> Set[str]:
+        """
+        Get stopwords for specified language.
+
+        Uses the project's multi-language stopwords (stopwords-iso.json)
+        which supports 50+ languages.
+
+        Args:
+            lang: ISO 639-1 language code (default: 'en')
+
+        Returns:
+            Set of stopwords for that language
+        """
+        cache_key = f"stopwords_{lang}"
+        if cache_key not in self._stopwords_cache:
             try:
-                from nltk.corpus import stopwords
-                import nltk
+                from src.indexer.stopwords import get_stopwords_for_language
 
-                try:
-                    nltk.data.find("corpora/stopwords")
-                except LookupError:
-                    nltk.download("stopwords", quiet=True)
-
-                self._stopwords = set(stopwords.words("english"))
-            except:
-                # Fallback stopwords
-                self._stopwords = {
+                stopwords_set = get_stopwords_for_language(lang)
+                self._stopwords_cache[cache_key] = set(stopwords_set)
+            except Exception:
+                # Fallback to minimal English stopwords
+                self._stopwords_cache[cache_key] = {
                     "the",
                     "a",
                     "an",
@@ -159,11 +168,11 @@ class QueryExpander:
                     "they",
                     "them",
                     "their",
-                    "s",
                     "book",
                     "books",
                 }
-        return self._stopwords
+
+        return self._stopwords_cache[cache_key]
 
     def _expand_english(self, word: str) -> Set[str]:
         """
@@ -216,7 +225,7 @@ class QueryExpander:
         if len(word) < self.min_word_length:
             return set()
 
-        if word.lower() in self._get_stopwords():
+        if word.lower() in self._get_stopwords(lang):
             return set()
 
         # Use language-specific expander
@@ -292,14 +301,35 @@ class QueryExpander:
 
         return expansions
 
+    def get_supported_languages(self) -> List[str]:
+        """
+        Get list of supported language codes for query expansion.
+
+        Returns:
+            List of ISO 639-1 language codes
+        """
+        # Currently only English has WordNet support
+        # Other languages fallback to English + stopwords filtering
+        return ["en"]  # Could extend with multilingual WordNets
+
+    def add_language_expander(self, lang: str, expander_func: callable):
+        """
+        Add a custom expander for a language.
+
+        Args:
+            lang: ISO 639-1 language code
+            expander_func: Function(word: str) -> Set[str] that returns synonyms
+        """
+        self.lang_expanders[lang] = expander_func
+
 
 class BookQueryExpander(QueryExpander):
     """
     Book-specific query expander with domain knowledge.
     """
 
-    # Domain-specific term mappings for books
-    BOOK_SYNONYMS = {
+    # Domain-specific term mappings for books (English)
+    BOOK_SYNONYMS_EN = {
         "novel": ["fiction", "story", "book", "tale", "narrative"],
         "author": ["writer", "novelist", "poet", "playwright"],
         "chapter": ["section", "part", "division"],
@@ -310,21 +340,55 @@ class BookQueryExpander(QueryExpander):
         "literature": ["writings", "books", "works", "letters"],
     }
 
+    # Portuguese book synonyms (for PPORTAL support)
+    BOOK_SYNONYMS_PT = {
+        "livro": ["obra", "publicação", "volum", "escrito"],
+        "autor": ["escritor", "novelista", "poeta", "dramaturgo"],
+        "capítulo": ["seção", "parte", "divisão"],
+        "enredo": ["história", "trama", "narrativa"],
+        "personagem": ["protagonista", "herói", "figura"],
+        "tema": ["assunto", "tópico", "ideia"],
+        "gênero": ["categoria", "tipo", "estilo"],
+        "literatura": ["escritos", "obras", "letras"],
+    }
+
     def __init__(self, **kwargs):
         """Initialize with book-specific expansions."""
         super().__init__(**kwargs)
+
+        # Register language-specific book synonyms
+        self._book_synonyms = {
+            "en": self.BOOK_SYNONYMS_EN,
+            "pt": self.BOOK_SYNONYMS_PT,
+        }
 
     def expand_word(self, word: str, lang: str = "en") -> Set[str]:
         """Expand with WordNet + book-specific terms."""
         synonyms = super().expand_word(word, lang)
 
-        # Add book-specific synonyms
-        if word.lower() in self.BOOK_SYNONYMS:
-            synonyms.update(self.BOOK_SYNONYMS[word.lower()])
+        # Add language-specific book synonyms
+        if lang in self._book_synonyms:
+            lang_synonyms = self._book_synonyms[lang]
+            if word.lower() in lang_synonyms:
+                synonyms.update(lang_synonyms[word.lower()])
 
-        # Check reverse mapping
-        for term, syns in self.BOOK_SYNONYMS.items():
-            if word.lower() in syns:
-                synonyms.add(term)
+            # Check reverse mapping
+            for term, syns in lang_synonyms.items():
+                if word.lower() in syns:
+                    synonyms.add(term)
+
+        # Fallback to English if no results and lang is not English
+        if not synonyms and lang != "en":
+            # Try English synonyms
+            en_synonyms = super().expand_word(word, "en")
+            synonyms.update(en_synonyms)
+
+            # Also check English book synonyms
+            if word.lower() in self.BOOK_SYNONYMS_EN:
+                synonyms.update(self.BOOK_SYNONYMS_EN[word.lower()])
 
         return synonyms
+
+    def get_supported_languages(self) -> List[str]:
+        """Get supported languages including book-specific ones."""
+        return ["en", "pt"]
