@@ -9,12 +9,12 @@ import {
   IoLanguage,
   IoCalendarOutline,
   IoDocumentTextOutline,
-  IoLibraryOutline,
   IoGlobeOutline,
-  IoBarChartOutline,
-  IoEyeOutline
+  IoEyeOutline,
+  IoReaderOutline
 } from "react-icons/io5";
 import { CachedImage } from "~/components/ui/CachedImage";
+import { BookReader } from "./BookReader";
 
 interface BookDetailsPanelProps {
   book: BookMetadata;
@@ -37,6 +37,7 @@ export function BookDetailsPanel({ book, isLoading, onClose }: BookDetailsPanelP
   const [showPreview, setShowPreview] = useState(false);
   const [openLibraryData, setOpenLibraryData] = useState<OpenLibraryData | null>(null);
   const [isFetchingOL, setIsFetchingOL] = useState(false);
+  const [readerFile, setReaderFile] = useState<{ url: string; format: string } | null>(null);
 
   // Fetch OpenLibrary data
   const fetchOpenLibraryData = useCallback(async () => {
@@ -66,10 +67,29 @@ export function BookDetailsPanel({ book, isLoading, onClose }: BookDetailsPanelP
     ...(book.all_sources?.flatMap(s => s.files || []) || [])
   ];
   
-  // Remove duplicates based on URL
-  const uniqueFiles = allFiles.filter((file, index, self) =>
-    index === self.findIndex(f => f.url === file.url)
-  );
+  // Remove duplicates based on URL and filter out invalid entries
+  const uniqueFiles = allFiles
+    .filter(file => file && file.url) // Filter out null/undefined entries
+    .filter((file, index, self) =>
+      index === self.findIndex(f => f.url === file.url)
+    );
+  
+  // For Gutenberg books, if no files are provided, generate them
+  const { provider, bookId } = (() => {
+    const parts = book.canonical_id.split(':');
+    return { provider: parts[0], bookId: parts.slice(1).join(':') };
+  })();
+  
+  const gutenbergFiles = provider === 'gutenberg' && allFiles.filter(f => f && f.url).length === 0
+    ? [
+        { format: 'html', url: `https://www.gutenberg.org/files/${bookId}/${bookId}-h/${bookId}-h.htm` },
+        { format: 'txt', url: `https://www.gutenberg.org/files/${bookId}/${bookId}-0.txt` },
+        { format: 'epub', url: `https://www.gutenberg.org/ebooks/${bookId}.epub` },
+        { format: 'pdf', url: `https://www.gutenberg.org/ebooks/${bookId}.pdf` },
+      ]
+    : [];
+  
+  const displayFiles = [...uniqueFiles, ...gutenbergFiles];
   
   const primaryUrl = book.primary_source?.url || "#";
   const sourceProvider = book.primary_source?.provider || "Unknown";
@@ -81,12 +101,12 @@ export function BookDetailsPanel({ book, isLoading, onClose }: BookDetailsPanelP
     (openLibraryData?.covers?.[0] ? `https://covers.openlibrary.org/b/id/${openLibraryData.covers[0]}-L.jpg` : null);
 
   // Group files by format
-  const filesByFormat = uniqueFiles.reduce((acc, file) => {
+  const filesByFormat = displayFiles.reduce((acc, file) => {
     const format = file.format?.toLowerCase() || 'unknown';
     if (!acc[format]) acc[format] = [];
     acc[format].push(file);
     return acc;
-  }, {} as Record<string, typeof uniqueFiles>);
+  }, {} as Record<string, typeof displayFiles>);
 
   // Common book formats to prioritize
   const formatPriority = ['pdf', 'epub', 'txt', 'html', 'mobi', 'azw3'];
@@ -106,6 +126,20 @@ export function BookDetailsPanel({ book, isLoading, onClose }: BookDetailsPanelP
 
   // Get description from various sources
   const description = book.description || openLibraryData?.description || null;
+
+  // Find readable files (PDF, EPUB, HTML, TXT)
+  const readableFiles = displayFiles.filter(f => {
+    const format = f.format?.toLowerCase();
+    return format === 'pdf' || format === 'epub' || format === 'html' || format === 'txt';
+  });
+
+  const pdfFile = readableFiles.find(f => f.format?.toLowerCase() === 'pdf');
+  const epubFile = readableFiles.find(f => f.format?.toLowerCase() === 'epub');
+  const htmlFile = readableFiles.find(f => f.format?.toLowerCase() === 'html');
+  const txtFile = readableFiles.find(f => f.format?.toLowerCase() === 'txt');
+  
+  // Best file for reading (priority: HTML, PDF, TXT, EPUB)
+  const bestReadFile = htmlFile || pdfFile || txtFile || epubFile;
 
   return (
     <div className="flex flex-col h-full bg-white dark:bg-boogle-dark">
@@ -140,16 +174,26 @@ export function BookDetailsPanel({ book, isLoading, onClose }: BookDetailsPanelP
 
             {/* Quick Actions */}
             <div className="w-full space-y-3">
-              <a
-                href={primaryUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center justify-center gap-2 w-full px-6 py-4 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-all duration-200 shadow-lg hover:shadow-xl"
-              >
-                <IoBookOutline className="w-5 h-5" />
-                {t('read_now')}
-              </a>
-              
+              {bestReadFile ? (
+                <button
+                  onClick={() => setReaderFile({ url: bestReadFile.url, format: bestReadFile.format.toLowerCase() })}
+                  className="flex items-center justify-center gap-2 w-full px-6 py-4 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-all duration-200 shadow-lg hover:shadow-xl"
+                >
+                  <IoReaderOutline className="w-5 h-5" />
+                  Read {bestReadFile.format.toUpperCase()}
+                </button>
+              ) : (
+                <a
+                  href={primaryUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center justify-center gap-2 w-full px-6 py-4 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-all duration-200 shadow-lg hover:shadow-xl"
+                >
+                  <IoGlobeOutline className="w-5 h-5" />
+                  View on {sourceProvider}
+                </a>
+              )}
+
               <div className="flex gap-3">
                 <button className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl font-medium hover:bg-gray-100 dark:hover:bg-white/5 transition-colors">
                   <IoBookmarkOutline className="w-5 h-5" />
@@ -159,6 +203,46 @@ export function BookDetailsPanel({ book, isLoading, onClose }: BookDetailsPanelP
                   <IoShareSocialOutline className="w-5 h-5" />
                   Share
                 </button>
+              </div>
+              
+              {/* Additional format buttons */}
+              <div className="flex flex-wrap gap-2 pt-2">
+                {pdfFile && bestReadFile?.url !== pdfFile.url && (
+                  <button
+                    onClick={() => setReaderFile({ url: pdfFile.url, format: 'pdf' })}
+                    className="flex items-center gap-2 px-3 py-2 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 rounded-lg text-sm font-medium hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
+                  >
+                    <IoReaderOutline className="w-4 h-4" />
+                    PDF
+                  </button>
+                )}
+                {epubFile && bestReadFile?.url !== epubFile.url && (
+                  <button
+                    onClick={() => setReaderFile({ url: epubFile.url, format: 'epub' })}
+                    className="flex items-center gap-2 px-3 py-2 bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 rounded-lg text-sm font-medium hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors"
+                  >
+                    <IoReaderOutline className="w-4 h-4" />
+                    EPUB
+                  </button>
+                )}
+                {htmlFile && bestReadFile?.url !== htmlFile.url && (
+                  <button
+                    onClick={() => setReaderFile({ url: htmlFile.url, format: 'html' })}
+                    className="flex items-center gap-2 px-3 py-2 bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-300 rounded-lg text-sm font-medium hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors"
+                  >
+                    <IoReaderOutline className="w-4 h-4" />
+                    HTML
+                  </button>
+                )}
+                {txtFile && bestReadFile?.url !== txtFile.url && (
+                  <button
+                    onClick={() => setReaderFile({ url: txtFile.url, format: 'txt' })}
+                    className="flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-white/10 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium hover:bg-gray-200 dark:hover:bg-white/20 transition-colors"
+                  >
+                    <IoReaderOutline className="w-4 h-4" />
+                    TXT
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -195,7 +279,7 @@ export function BookDetailsPanel({ book, isLoading, onClose }: BookDetailsPanelP
             </div>
 
             {/* Metadata Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
               {book.page_count && (
                 <div className="bg-gray-50 dark:bg-white/5 rounded-xl p-4">
                   <div className="text-xs text-gray-500 dark:text-gray-400 uppercase font-medium mb-1">Pages</div>
@@ -205,20 +289,15 @@ export function BookDetailsPanel({ book, isLoading, onClose }: BookDetailsPanelP
                   </div>
                 </div>
               )}
-              <div className="bg-gray-50 dark:bg-white/5 rounded-xl p-4">
-                <div className="text-xs text-gray-500 dark:text-gray-400 uppercase font-medium mb-1">Sources</div>
-                <div className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                  <IoLibraryOutline className="w-5 h-5 text-green-500" />
-                  {book.source_count}
+              {book.language && (
+                <div className="bg-gray-50 dark:bg-white/5 rounded-xl p-4">
+                  <div className="text-xs text-gray-500 dark:text-gray-400 uppercase font-medium mb-1">Language</div>
+                  <div className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                    <IoLanguage className="w-5 h-5 text-green-500" />
+                    {book.language.toUpperCase()}
+                  </div>
                 </div>
-              </div>
-              <div className="bg-gray-50 dark:bg-white/5 rounded-xl p-4">
-                <div className="text-xs text-gray-500 dark:text-gray-400 uppercase font-medium mb-1">Complete</div>
-                <div className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                  <IoBarChartOutline className="w-5 h-5 text-purple-500" />
-                  {(book.metadata_completeness * 100).toFixed(0)}%
-                </div>
-              </div>
+              )}
               {isbn && (
                 <div className="bg-gray-50 dark:bg-white/5 rounded-xl p-4">
                   <div className="text-xs text-gray-500 dark:text-gray-400 uppercase font-medium mb-1">ISBN</div>
@@ -326,8 +405,18 @@ export function BookDetailsPanel({ book, isLoading, onClose }: BookDetailsPanelP
               </a>
             </div>
           </div>
-        </div>
       </div>
-    </div>
+  </div>
+    
+    {/* Book Reader Modal */}
+    {readerFile ? (
+      <BookReader
+        url={readerFile.url}
+        format={readerFile.format as 'pdf' | 'epub' | 'html' | 'txt'}
+        title={book.title}
+        onClose={() => setReaderFile(null)}
+      />
+    ) : null}
+  </div>
   );
 }
