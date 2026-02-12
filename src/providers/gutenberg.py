@@ -13,12 +13,14 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 try:
     import requests
+
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
     requests = None
 try:
     from bs4 import BeautifulSoup
+
     BS4_AVAILABLE = True
 except ImportError:
     BS4_AVAILABLE = False
@@ -184,7 +186,17 @@ class GutenbergProvider(BaseBookProvider):
                     elif key == "downloads":
                         metadata["downloads"] = value
 
-        # Extract file links
+        # Extract file links and normalize format names
+        format_map = {
+            "plain text": "txt",
+            "txt": "txt",
+            "epub": "epub",
+            "pdf": "pdf",
+            "html": "html",
+            "mobi": "mobi",
+            "kindle": "mobi",
+        }
+
         files_table = soup.find("table", class_="files")
         if files_table:
             for row in files_table.find_all("tr"):
@@ -196,14 +208,16 @@ class GutenbergProvider(BaseBookProvider):
                         if isinstance(href_value, list)
                         else str(href_value)
                     )
-                    text = link.get_text(strip=True)
+                    text = link.get_text(strip=True).lower()
                     if href:
                         full_url = (
                             href
                             if isinstance(href, str) and href.startswith("http")
                             else f"{self.base_url}{href}"
                         )
-                        metadata["files"].append({"format": text, "url": full_url})
+                        # Normalize format name
+                        fmt = format_map.get(text, text)
+                        metadata["files"].append({"format": fmt, "url": full_url})
 
         return metadata
 
@@ -245,6 +259,36 @@ class GutenbergProvider(BaseBookProvider):
                 if not book_id:
                     continue
 
+                # Build download URLs using Gutenberg's standard URL patterns
+                files = []
+                base_download = f"https://www.gutenberg.org"
+
+                # Standard Gutenberg download URLs
+                files.append(
+                    {
+                        "format": "txt",
+                        "url": f"{base_download}/ebooks/{book_id}.txt.utf-8",
+                    }
+                )
+                files.append(
+                    {
+                        "format": "epub",
+                        "url": f"{base_download}/ebooks/{book_id}.epub.noimages",
+                    }
+                )
+                files.append(
+                    {
+                        "format": "epub",
+                        "url": f"{base_download}/ebooks/{book_id}.epub.images",
+                    }
+                )
+                files.append(
+                    {
+                        "format": "pdf",
+                        "url": f"{base_download}/files/{book_id}/{book_id}-pdf.pdf",
+                    }
+                )
+
                 meta = {
                     "source": self.source_name,
                     "book_id": str(book_id),
@@ -254,7 +298,7 @@ class GutenbergProvider(BaseBookProvider):
                     "language": row.get("Language"),
                     "category": row.get("Subjects"),
                     "release_date": row.get("Issued"),
-                    "files": [],
+                    "files": files,
                 }
 
                 yield meta
