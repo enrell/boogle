@@ -190,6 +190,16 @@ class BookSeeder:
                 current_position = i + 1
                 continue
 
+            # Fetch actual file information if files are empty
+            # This is needed for providers like Gutenberg where CSV doesn't include files
+            if not metadata.get("files"):
+                try:
+                    detailed_meta = provider.extract_metadata(book_id)
+                    if detailed_meta.get("files"):
+                        metadata["files"] = detailed_meta["files"]
+                except Exception:
+                    pass  # Keep empty files if extraction fails
+
             # Queue download if not in light mode
             if not self.light_mode:
                 pending_downloads.append((book_id, metadata))

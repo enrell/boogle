@@ -225,11 +225,14 @@ class GutenbergProvider(BaseBookProvider):
         """
         Stream metadata from Gutenberg catalog CSV feed.
 
+        Note: Files are not populated from CSV to avoid returning non-existent formats.
+        Use extract_metadata(book_id) to get actual available files.
+
         Args:
             limit: Maximum number of books to yield
 
         Yields:
-            Dict: Book metadata
+            Dict: Book metadata (without files - files must be fetched separately)
         """
         feed_url = f"{self.base_url}/cache/epub/feeds/pg_catalog.csv"
 
@@ -259,36 +262,6 @@ class GutenbergProvider(BaseBookProvider):
                 if not book_id:
                     continue
 
-                # Build download URLs using Gutenberg's standard URL patterns
-                files = []
-                base_download = f"https://www.gutenberg.org"
-
-                # Standard Gutenberg download URLs
-                files.append(
-                    {
-                        "format": "txt",
-                        "url": f"{base_download}/ebooks/{book_id}.txt.utf-8",
-                    }
-                )
-                files.append(
-                    {
-                        "format": "epub",
-                        "url": f"{base_download}/ebooks/{book_id}.epub.noimages",
-                    }
-                )
-                files.append(
-                    {
-                        "format": "epub",
-                        "url": f"{base_download}/ebooks/{book_id}.epub.images",
-                    }
-                )
-                files.append(
-                    {
-                        "format": "pdf",
-                        "url": f"{base_download}/files/{book_id}/{book_id}-pdf.pdf",
-                    }
-                )
-
                 meta = {
                     "source": self.source_name,
                     "book_id": str(book_id),
@@ -298,7 +271,7 @@ class GutenbergProvider(BaseBookProvider):
                     "language": row.get("Language"),
                     "category": row.get("Subjects"),
                     "release_date": row.get("Issued"),
-                    "files": files,
+                    "files": [],  # Not populated from CSV - use extract_metadata()
                 }
 
                 yield meta
