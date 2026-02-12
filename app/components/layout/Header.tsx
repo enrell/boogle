@@ -9,20 +9,27 @@ interface HeaderProps {
 
 export function Header({ query }: HeaderProps) {
   return (
-    <header className="flex flex-wrap md:flex-nowrap items-center justify-between md:justify-start p-3 md:p-4 border-b border-gray-200 dark:border-white/5 gap-y-3 md:gap-4 sticky top-0 bg-white dark:bg-boogle-dark z-30">
-      <div className="flex-shrink-0 order-1">
-        <Logo size="small" />
-      </div>
+    <header className="sticky top-0 z-30 bg-white dark:bg-boogle-dark border-b border-gray-200 dark:border-white/5">
+      <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-16 gap-4">
+          {/* Logo */}
+          <div className="flex-shrink-0">
+            <Logo size="small" />
+          </div>
 
-      <div className="order-3 md:order-2 w-full md:w-auto md:flex-1 flex justify-center md:justify-start md:px-8">
-        <div className="w-full max-w-none md:max-w-2xl">
-          <SearchBar defaultValue={query} variant="header" />
+          {/* Centered Search Bar */}
+          <div className="flex-1 flex justify-center max-w-3xl mx-auto">
+            <div className="w-full max-w-2xl">
+              <SearchBar defaultValue={query} variant="header" />
+            </div>
+          </div>
+
+          {/* Right Controls */}
+          <div className="flex-shrink-0 flex items-center gap-3">
+            <LanguageSwitcher />
+            <ThemeToggle />
+          </div>
         </div>
-      </div>
-
-      <div className="flex-shrink-0 flex items-center gap-2 order-2 md:order-3">
-        <LanguageSwitcher />
-        <ThemeToggle />
       </div>
     </header>
   );

@@ -168,10 +168,10 @@ export default function Search() {
     <div className="flex flex-col min-h-screen bg-white dark:bg-boogle-dark">
       <Header query={query} />
 
-      <div className="flex flex-1 relative overflow-hidden">
-        {/* Main Results Area */}
-        <main className="flex-1 overflow-y-auto px-4 py-6 md:px-8">
-          <div className="max-w-7xl w-full">
+      <div className="flex-1 relative overflow-hidden">
+        {/* Main Results Area - Centered with better margins */}
+        <main className="flex-1 overflow-y-auto py-8">
+          <div className="max-w-[1400px] mx-auto px-6 sm:px-8 lg:px-12">
             {error && (
               <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
                 <p className="text-red-700 font-medium">{error}</p>
@@ -191,7 +191,7 @@ export default function Search() {
               </div>
             )}
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 pb-10 px-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-6 lg:gap-8 pb-10 justify-items-center">
               {results.map((book) => {
                 // Use enhanced cover from OpenLibrary search if available
                 const enhancedCover = enhancedCovers[book.canonical_id];
