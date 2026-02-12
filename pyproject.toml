@@ -27,6 +27,11 @@ dependencies = [
     "lingua-language-detector>=2.1.0",
     "fasttext>=0.9.3",
     "unidecode>=1.3.8",
+    # Evaluation
+    "ir-measures>=0.3.4",
+    "pandas>=2.2.0",
+    "matplotlib>=3.8.0",
+    "seaborn>=0.13.0",
 ]
 
 [project.scripts]

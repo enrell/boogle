@@ -82,13 +82,10 @@ and returns ranked results according to query relevance — just like a miniatur
 Get started immediately without any external database services.
 
 1. **Seed & Index Books:**
-    This command downloads 1000 books from Gutenberg and builds the search index.
+    This command downloads 1000 books from all providers and builds the search index.
     ```bash
-    # Single provider
     uv run boogle index --limit 1000 --sqlite
 
-    # Multiple providers in parallel
-    uv run boogle index --limit 1000 --sqlite --parallel --providers gutenberg,openlibrary
     ```
 
 2. **Search via CLI:**
@@ -223,15 +220,17 @@ Boogle exposes two main CLI tools: `boogle` (APP) and `boogle-db` (DB Ops).
 ### `boogle` - Application Pipeline
 | Command | Description | Flags |
 |---------|-------------|-------|
-| `index` | Downloads books and builds the BM25 index | `--limit N` `--sqlite` `--workers N` `--reindex` `--light-mode` `--enrich` |
+| `index` | Downloads books and builds the BM25 index | `--limit N` `--sqlite` `--workers N` `--batch-size N` `--reindex` `--light-mode` `--enrich` `--chunk-size N` `--chunk-overlap N` `--nrt` `--no-cross-reference` `--keep-books` `--providers [list]` |
 | `search` | Performs a search query via CLI | `query` `--top-k N` `--sqlite` `--light-mode` |
-| `api` | Starts the FastAPI server | `--port N` `--host 0.0.0.0` `--sqlite` |
+| `api` | Starts the FastAPI server | `--host 0.0.0.0` `--port N` `--sqlite` `--light-mode` `--nrt` |
 
 ### `boogle-db` - Database Management (Postgres)
 | Command | Description |
 |---------|-------------|
-| `migrate` | Creates necessary tables (`books`, `seed_offsets`, `cross_references`) |
+| `migrate` | Creates necessary tables (`books`, `idx_documents`, `idx_terms`, `idx_globals`) |
+| `clear` | Truncates index tables only (`idx_documents`, `idx_terms`, `idx_globals`) |
 | `clear-all`| Truncates all tables (Data Reset) |
+| `drop` | Drops all tables |
 | `test` | Verifies database connection and schema |
 
 ---
@@ -608,9 +607,9 @@ Boogle exposes two main CLI tools: `boogle` (APP) and `boogle-db` (DB Ops).
 ### `boogle` - Application Pipeline
 | Command | Description |Flags|
 |---------|-------------|-----|
-| `index` | Downloads books and builds the BM25 index | `--limit N`, `--sqlite`, `--workers N`, `--reindex`, `--light-mode`, `--enrich`, `--parallel`, `--max-parallel-providers N`, `--nrt`, `--no-cross-reference`, `--providers [provider,...]`
+| `index` | Downloads books and builds the BM25 index | `--limit N`, `--sqlite`, `--workers N`, `--batch-size N`, `--reindex`, `--light-mode`, `--enrich`, `--chunk-size N`, `--chunk-overlap N`, `--nrt`, `--no-cross-reference`, `--keep-books`, `--providers [list]` |
 | `search` | Performs a search query via CLI | `query`, `--top-k N`, `--sqlite`, `--light-mode` |
-| `api` | Starts the FastAPI server | `--port N`, `--host 0.0.0.0`, `--sqlite`, `--light-mode`, `--nrt` |
+| `api` | Starts the FastAPI server | `--host 0.0.0.0`, `--port N`, `--sqlite`, `--light-mode`, `--nrt` |
 
 ---
 

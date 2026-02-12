@@ -2,7 +2,7 @@ import os
 import logging
 from typing import Dict, List, Optional, Any, Iterator
 from contextlib import contextmanager
-from sqlalchemy import create_engine, select, text, func, inspect
+from sqlalchemy import create_engine, select, text, func, inspect, delete
 from sqlalchemy.orm import sessionmaker, Session, scoped_session
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -117,6 +117,7 @@ class DatabaseManager:
             "downloads": metadata.get("downloads"),
             # 'files' handled by ORM mapping (list -> JSON)
             "files": metadata.get("files") or [],
+            "local_path": metadata.get("local_path"),
         }
 
         # Fallback cover URL for Gutenberg
@@ -209,6 +210,18 @@ class DatabaseManager:
                     source=source, position=position, last_book_id=last_book_id
                 )
                 session.add(new_rec)
+
+    def reset_seed_offsets(self) -> None:
+        """Reset all provider seed offsets to start from beginning."""
+        with self.get_session() as session:
+            session.execute(delete(SeedOffset))
+
+    def clear_all_books(self) -> int:
+        """Clear all books from the database. Returns count of deleted books."""
+        with self.get_session() as session:
+            count = session.query(Book).count()
+            session.execute(delete(Book))
+            return count
 
 
 PostgresRepository = DatabaseManager

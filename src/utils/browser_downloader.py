@@ -76,11 +76,28 @@ class BrowserDownloader:
             return None
 
         try:
-            async with AsyncCamoufox() as fox:
+            async with AsyncCamoufox(headless=self.headless) as fox:
                 page = await fox.new_page()
 
                 # Navigate to the URL
                 await page.goto(url, timeout=self.timeout * 1000)
+
+                # Wait for Cloudflare challenge if present
+                for _ in range(10):  # Max 10 checks
+                    await asyncio.sleep(2)
+
+                    # Check if we're still on a challenge page
+                    challenge_indicators = await page.evaluate("""() => {
+                        const text = document.body ? document.body.innerText : '';
+                        return text.toLowerCase().includes('just a moment') || 
+                               text.toLowerCase().includes('please wait') ||
+                               text.toLowerCase().includes('checking your browser') ||
+                               text.toLowerCase().includes('cloudflare');
+                    }""")
+
+                    if not challenge_indicators:
+                        break
+
                 await page.wait_for_load_state("networkidle")
 
                 # Check if this is a direct PDF link
@@ -115,6 +132,76 @@ class BrowserDownloader:
                         pdf_data = await page.pdf()
                         output_path.write_bytes(pdf_data)
                         return output_path
+
+                    # Strategy 2: Handle pportal-style download links
+                    # Pattern: Links containing 'DetalheObraDownload.do' redirect to PDF
+                    try:
+                        # Find pportal download link
+                        pportal_link = await page.query_selector(
+                            'a[href*="DetalheObraDownload.do"]'
+                        )
+
+                        if pportal_link:
+                            href = await pportal_link.get_attribute("href")
+                            if href:
+                                # Make absolute URL
+                                if href.startswith("http"):
+                                    download_url = href
+                                else:
+                                    base = url.rsplit("/", 1)[0]
+                                    download_url = f"{base}/{href}"
+
+                                # Capture PDF responses
+                                pdf_responses = []
+
+                                def handle_response(response):
+                                    if ".pdf" in response.url:
+                                        pdf_responses.append(response)
+
+                                page.on("response", handle_response)
+
+                                # Navigate to download URL
+                                await page.goto(
+                                    download_url,
+                                    timeout=30000,
+                                    wait_until="networkidle",
+                                )
+                                await asyncio.sleep(3)
+
+                                # Try to get PDF from captured responses
+                                for resp in pdf_responses:
+                                    if resp.status == 200:
+                                        try:
+                                            body = await resp.body()
+                                            if (
+                                                body
+                                                and len(body) > 1000
+                                                and body[:4] == b"%PDF"
+                                            ):
+                                                output_path.write_bytes(body)
+                                                return output_path
+                                        except:
+                                            pass
+
+                                # Fallback: try current page if it's a PDF
+                                if page.url.endswith(".pdf"):
+                                    try:
+                                        response = await page.reload(
+                                            wait_until="networkidle"
+                                        )
+                                        if response:
+                                            body = await response.body()
+                                            if (
+                                                body
+                                                and len(body) > 1000
+                                                and body[:4] == b"%PDF"
+                                            ):
+                                                output_path.write_bytes(body)
+                                                return output_path
+                                    except:
+                                        pass
+                    except Exception:
+                        pass
 
         except Exception:
             pass
@@ -205,6 +292,7 @@ def download_with_browser(
         return await downloader._download_single(url, output_path)
 
     try:
-        return asyncio.get_event_loop().run_until_complete(_download())
+        # Use asyncio.run() which works in any context (main thread or thread pool)
+        return asyncio.run(_download())
     except Exception:
         return None

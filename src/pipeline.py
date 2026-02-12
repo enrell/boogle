@@ -277,12 +277,24 @@ def run_index_pipeline(
         enabled = "enabled" if p.enabled_by_default else "disabled by default"
         print(f"  - {p.source_name} ({enabled})")
 
-    # Step 2: Seed corpus
+    # Step 2: Reset checkpoints and clear books if reindexing
+    if reindex:
+        print("\n" + "=" * 60)
+        print("Resetting provider checkpoints for full reindex")
+        print("=" * 60)
+        db = PostgresRepository(use_sqlite=use_sqlite)
+        db.reset_seed_offsets()
+        deleted = db.clear_all_books()
+        db.close()
+        print(f"Checkpoints reset - will re-download from beginning")
+        print(f"Cleared {deleted} existing books from database")
+
+    # Step 3: Seed corpus
     print("\n" + "=" * 60)
-    print(f"Step 2: Seeding Corpus")
-    print(f"  SQLite: {use_sqlite}")
-    print(f"  Light Mode: {light_mode}")
-    print(f"  Cross-reference: {cross_reference}")
+    print(f"Step 3: Seeding Corpus")
+    print(f" SQLite: {use_sqlite}")
+    print(f" Light Mode: {light_mode}")
+    print(f" Cross-reference: {cross_reference}")
     print("=" * 60)
 
     seeder = BookSeeder(
@@ -311,10 +323,10 @@ def run_index_pipeline(
         print("\nNo new books found. Index is up to date.")
         return 0
 
-    # Step 3: Optional enrichment
+    # Step 4: Optional enrichment
     if enrich:
         print("\n" + "=" * 60)
-        print("Step 3: Enriching Metadata")
+        print("Step 4: Enriching Metadata")
         print("=" * 60)
 
         try:
@@ -326,11 +338,11 @@ def run_index_pipeline(
             print(f"Enrichment failed: {e}")
             print("Continuing with indexing...")
 
-    # Step 4: Indexing
+    # Step 5: Indexing
     if light_mode:
         # Light mode: metadata-only index
         print("\n" + "=" * 60)
-        print("Step 4: Building Metadata Index (Light Mode)")
+        print("Step 5: Building Metadata Index (Light Mode)")
         print("=" * 60)
 
         from src.indexer.metadata_indexer import index_metadata
@@ -356,7 +368,7 @@ def run_index_pipeline(
 
     # Full-text indexing
     print("\n" + "=" * 60)
-    print(f"Step 4: Building Index")
+    print(f"Step 5: Building Index")
     print(f"  Mode: {'NRT (incremental)' if use_nrt else 'Batch (full rebuild)'}")
     print(f"  Reindex: {reindex}")
     print("=" * 60)
@@ -508,6 +520,15 @@ def search(
         from src.indexer.metadata_indexer import MetadataIndexer
 
         metadata_index_dir = os.getenv("METADATA_INDEX_DIR", "data/index_metadata")
+        metadata_path = Path(metadata_index_dir)
+
+        # Check if metadata index exists
+        if not (metadata_path / "index.json").exists():
+            print(f"Error: Metadata index not found at {metadata_index_dir}")
+            print(
+                "Please run 'boogle index --light-mode' first to build the metadata index."
+            )
+            return
 
         print(f"Searching metadata index...")
         indexer = MetadataIndexer(index_dir=metadata_index_dir, use_sqlite=use_sqlite)
@@ -536,6 +557,14 @@ def search(
     else:
         # Full-text search
         index_dir = os.getenv("INDEX_DIR", "data/index")
+        index_path = Path(index_dir)
+
+        # Check if index exists
+        if not (index_path / "index.json").exists():
+            print(f"Error: Index not found at {index_dir}")
+            print("Please run 'boogle index' first to build the index.")
+            return
+
         stopwords = list(load_stopwords())
 
         searcher = FileSearcher(index_dir)
