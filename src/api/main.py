@@ -177,7 +177,7 @@ async def list_providers():
     return {"providers": providers}
 
 
-@app.get("/search", response_model=List[SearchResult])
+@app.get("/search")
 async def search_books(
     query: str = Query(..., min_length=1, max_length=1000),
     limit: int = Query(10, ge=1, le=100),
@@ -193,13 +193,85 @@ async def search_books(
     min_completeness: float = Query(0.0, ge=0.0, le=1.0),
 ):
     """
-    Search books with filters.
+    Search books with filters and NLP enhancements.
+
+    This endpoint automatically applies:
+    - Language detection (75+ languages)
+    - Spell correction (typos automatically fixed)
+    - Query expansion (synonyms and related terms)
 
     Returns unified results with multiple sources per book.
     """
     if database is None:
         raise HTTPException(status_code=500, detail="Database not initialized")
 
+    # Try enhanced search first (if available)
+    if use_enhanced_search and enhanced_searcher is not None:
+        try:
+            # Validate query
+            try:
+                query = SecurityValidators.validate_query(query)
+            except SecurityError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+
+            # Use enhanced search with spell correction and expansion
+            results, query_info = enhanced_searcher.search(
+                query,
+                top_k=limit,
+                apply_spellcheck=True,
+                apply_expansion=True,
+            )
+
+            # Convert to API format
+            api_results = []
+            for result in results:
+                # Get metadata
+                meta = None
+                for source in ["gutenberg", "openlibrary", "pportal"]:
+                    meta = database.get_book(source, result.book_id)
+                    if meta:
+                        break
+
+                if meta:
+                    api_results.append(_build_search_result(meta, result.score))
+
+            # Build response with enhancement metadata
+            response = {
+                "results": api_results,
+                "meta": {
+                    "total": len(api_results),
+                    "limit": limit,
+                    "offset": offset,
+                    "query": query_info.get("corrected_query", query),
+                    "original_query": query_info["original_query"],
+                },
+                "enhancements": {
+                    "language_detected": query_info.get("language"),
+                    "spell_corrected": query_info.get("was_corrected", False),
+                    "query_expanded": query_info.get("was_expanded", False),
+                },
+            }
+
+            # Add spell corrections if any
+            if query_info.get("was_corrected"):
+                response["enhancements"]["spell_corrections"] = query_info.get(
+                    "spell_corrections", {}
+                )
+
+            # Add expansions if any
+            if query_info.get("was_expanded"):
+                response["enhancements"]["expansions"] = query_info.get(
+                    "expansions", {}
+                )
+
+            return response
+
+        except Exception as e:
+            # Log error and fall back to basic search
+            print(f"Enhanced search error: {e}")
+            pass  # Fall through to basic search
+
+    # Fallback to basic search (original implementation)
     # Validate query
     try:
         query = SecurityValidators.validate_query(query)
@@ -254,7 +326,20 @@ async def search_books(
             # Fallback to database search
             return _database_search(query, limit, offset, filters)
 
-    return results[:limit]
+    return {
+        "results": results[:limit],
+        "meta": {
+            "total": len(results[:limit]),
+            "limit": limit,
+            "offset": offset,
+            "query": query,
+        },
+        "enhancements": {
+            "language_detected": None,
+            "spell_corrected": False,
+            "query_expanded": False,
+        },
+    }
 
 
 def _database_search(
@@ -377,91 +462,6 @@ def _build_search_result(meta: dict, score: float) -> SearchResult:
         source_count=1,
         score=score,
     )
-
-
-@app.get("/search/enhanced")
-async def search_enhanced(
-    query: str = Query(..., min_length=1, max_length=1000),
-    limit: int = Query(10, ge=1, le=100),
-    explain: bool = Query(
-        False, description="Return detailed explanation of enhancements"
-    ),
-    spellcheck: bool = Query(True, description="Apply spell correction"),
-    expand: bool = Query(True, description="Apply query expansion"),
-):
-    """
-    Search with NLP enhancements (spell correction + query expansion).
-
-    Features:
-    - Automatic language detection
-    - Spell correction for typos
-    - Query expansion with synonyms
-    - Detailed explanation of enhancements
-    """
-    if database is None:
-        raise HTTPException(status_code=500, detail="Database not initialized")
-
-    if not use_enhanced_search or enhanced_searcher is None:
-        # Fall back to regular search
-        return await search_books(query, limit)
-
-    # Validate query
-    try:
-        query = SecurityValidators.validate_query(query)
-    except SecurityError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    try:
-        if explain:
-            # Return detailed explanation
-            explanation = enhanced_searcher.search_with_explanation(query, limit)
-            return explanation
-        else:
-            # Standard enhanced search
-            results, query_info = enhanced_searcher.search(
-                query,
-                top_k=limit,
-                apply_spellcheck=spellcheck,
-                apply_expansion=expand,
-            )
-
-            # Convert to API format
-            api_results = []
-            for result in results:
-                # Get metadata
-                meta = None
-                for source in ["gutenberg", "openlibrary", "pportal"]:
-                    meta = database.get_book(source, result.book_id)
-                    if meta:
-                        break
-
-                if meta:
-                    api_results.append(_build_search_result(meta, result.score))
-
-            # Add enhancement metadata
-            response = {
-                "results": api_results,
-                "enhancements": {
-                    "spell_corrected": query_info.get("was_corrected", False),
-                    "query_expanded": query_info.get("was_expanded", False),
-                    "language": query_info.get("language"),
-                },
-                "original_query": query_info["original_query"],
-                "corrected_query": query_info.get("corrected_query", query),
-            }
-
-            if query_info.get("was_corrected"):
-                response["spell_corrections"] = query_info.get("spell_corrections", {})
-
-            if query_info.get("was_expanded"):
-                response["expansions"] = query_info.get("expansions", {})
-
-            return response
-
-    except Exception as e:
-        print(f"Enhanced search error: {e}")
-        # Fallback to regular search
-        return await search_books(query, limit)
 
 
 @app.get("/book/{canonical_id}", response_model=BookDetailResponse)

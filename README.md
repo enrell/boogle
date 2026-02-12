@@ -111,24 +111,27 @@ Get started immediately without any external database services.
 ## 🚀 Advanced Features
 
 ### Enhanced Search API
-Boogle includes advanced NLP features for better search:
+The `/search` endpoint automatically applies NLP enhancements:
 
 **1. Automatic Language Detection (75+ languages)**
 ```bash
 # Portuguese query auto-detected
-curl "http://localhost:8000/search/enhanced?query=memórias+póstumas"
+curl "http://localhost:8000/search?query=memórias+póstumas"
+# Response includes: "language_detected": "pt"
 ```
 
 **2. Spell Correction (SymSpell - 1000x faster)**
 ```bash
 # Typo automatically corrected: shakspeare → shakespeare
-curl "http://localhost:8000/search/enhanced?query=shakspeare"
+curl "http://localhost:8000/search?query=shakspeare"
+# Response includes: "corrected_query": "shakespeare"
 ```
 
 **3. Query Expansion (WordNet synonyms)**
 ```bash
 # "author" expands to: writer, poet, novelist, playwright
-curl "http://localhost:8000/search/enhanced?query=author"
+curl "http://localhost:8000/search?query=author"
+# Response includes expansions in metadata
 ```
 
 **4. Semantic Chunking**
