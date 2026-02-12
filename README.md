@@ -17,6 +17,10 @@ It combines a **Python** orchestrator (FastAPI, SQL adapters) with a high-perfor
 - 🔒 **Security First**: SQL injection, XSS, and path traversal protection
 - 🚀 **High Performance**: Rust-based BM25 with millisecond latency
 - 💾 **Flexible Storage**: SQLite or PostgreSQL support
+- 🌍 **Multilingual**: Automatic language detection (75+ languages)
+- ✏️ **Smart Search**: Spell correction + query expansion with synonyms
+- 📖 **Semantic Chunking**: Content-aware text splitting (chapter/paragraph/sentence)
+- 🧹 **Space Efficient**: Streaming cleanup deletes source files automatically
 
 ---
 
@@ -101,6 +105,50 @@ Get started immediately without any external database services.
     USE_SQLITE=1 uv run uvicorn src.api.main:app --port 8000
     ```
     > 📄 API Documentation available at: `http://127.0.0.1:8000/docs`
+
+---
+
+## 🚀 Advanced Features
+
+### Enhanced Search API
+Boogle includes advanced NLP features for better search:
+
+**1. Automatic Language Detection (75+ languages)**
+```bash
+# Portuguese query auto-detected
+curl "http://localhost:8000/search/enhanced?query=memórias+póstumas"
+```
+
+**2. Spell Correction (SymSpell - 1000x faster)**
+```bash
+# Typo automatically corrected: shakspeare → shakespeare
+curl "http://localhost:8000/search/enhanced?query=shakspeare"
+```
+
+**3. Query Expansion (WordNet synonyms)**
+```bash
+# "author" expands to: writer, poet, novelist, playwright
+curl "http://localhost:8000/search/enhanced?query=author"
+```
+
+**4. Semantic Chunking**
+Content-aware chunking preserves natural boundaries (chapter → paragraph → sentence):
+```python
+from rust_bm25 import chunk_text_semantic
+
+# Automatically respects chapter/paragraph boundaries
+chunks = chunk_text_semantic(text, target_size=500, overlap=50)
+```
+
+**5. Streaming Cleanup (Space Efficient)**
+By default, Boogle deletes source files immediately after indexing:
+```bash
+# Saves 90%+ disk space (default behavior)
+uv run boogle index --sqlite --limit 10000
+
+# Keep source files for debugging
+uv run boogle index --sqlite --limit 10000 --keep-books
+```
 
 ### Option 2: PostgreSQL (Local Development)
 Recommended for larger datasets and better concurrency.
