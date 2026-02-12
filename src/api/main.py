@@ -633,13 +633,20 @@ def _build_search_result(meta: dict, score: float) -> SearchResult:
     source = meta.get("source", "unknown")
     book_id = meta.get("book_id", "")
 
+    # Build files list from database
+    files = None
+    if meta.get("files"):
+        files = [
+            FileInfo(format=f.get("format", "txt"), url=f.get("url", ""))
+            for f in meta["files"]
+            if f.get("format")
+        ] or None
+
     primary_source = SourceInfo(
         provider=source,
         book_id=book_id,
         url=meta.get("url", f"https://example.com/{book_id}"),
-        files=[FileInfo(format=meta.get("format", "txt"), url=meta.get("url", ""))]
-        if meta.get("format")
-        else None,
+        files=files,
     )
 
     all_sources = [primary_source]
@@ -707,7 +714,12 @@ async def get_book_details(canonical_id: str):
             provider=source,
             book_id=book_id,
             url=meta.get("url", f"https://example.com/{book_id}"),
-            files=None,
+            files=[
+                FileInfo(format=f.get("format", "txt"), url=f.get("url", ""))
+                for f in (meta.get("files") or [])
+                if f.get("format")
+            ]
+            or None,
         ),
         all_sources=[
             SourceInfo(
@@ -715,10 +727,11 @@ async def get_book_details(canonical_id: str):
                 book_id=book_id,
                 url=meta.get("url", f"https://example.com/{book_id}"),
                 files=[
-                    FileInfo(format=meta.get("format", "txt"), url=meta.get("url", ""))
+                    FileInfo(format=f.get("format", "txt"), url=f.get("url", ""))
+                    for f in (meta.get("files") or [])
+                    if f.get("format")
                 ]
-                if meta.get("format")
-                else None,
+                or None,
             )
         ],
         source_count=1,
