@@ -29,6 +29,113 @@ from src.enrichment.openlibrary import OpenLibraryClient
 from src.enrichment.service import enrich_books_service
 
 
+def _index_with_streaming_cleanup(
+    books_dir: str,
+    index_dir: str,
+    chunks_dir: str,
+    stopwords: list,
+    chunk_size: int,
+    chunk_overlap: int,
+    batch_size: int,
+) -> tuple:
+    """
+    Index books with streaming cleanup.
+
+    Moves files to temp directory in batches, indexes them, then temp is cleaned.
+    This saves disk space by moving (not copying) files.
+
+    Returns:
+        Tuple of (indexed_count, total_chunks)
+    """
+    import shutil
+    import tempfile
+    from pathlib import Path
+
+    books_path = Path(books_dir)
+
+    # Find all book files
+    book_files = []
+    for pattern in ["**/*.txt", "**/*.epub", "**/*.pdf"]:
+        book_files.extend(books_path.glob(pattern))
+
+    if not book_files:
+        print(f"  No book files found in {books_dir}")
+        return 0, 0
+
+    print(f"  Found {len(book_files)} files to index")
+    print(f"  Processing in batches of {batch_size} to save disk space")
+
+    total_indexed = 0
+    total_chunks = 0
+    files_processed = 0
+
+    # Process in batches
+    for batch_start in range(0, len(book_files), batch_size):
+        batch_end = min(batch_start + batch_size, len(book_files))
+        batch = book_files[batch_start:batch_end]
+
+        # Create temporary directory for this batch
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # MOVE files to temp directory (saves space vs copying)
+            moved_files = []
+            for file_path in batch:
+                try:
+                    temp_file = temp_path / file_path.name
+                    shutil.move(str(file_path), str(temp_file))
+                    moved_files.append((file_path, temp_file))
+                except Exception as e:
+                    print(f"  Warning: Could not move {file_path.name}: {e}")
+                    continue
+
+            if not moved_files:
+                continue
+
+            # Index this batch
+            try:
+                batch_indexed, batch_chunks = index_corpus_file(
+                    str(temp_path),
+                    index_dir,
+                    chunks_dir,
+                    stopwords,
+                    chunk_size,
+                    chunk_overlap,
+                    len(moved_files),
+                )
+
+                total_indexed += batch_indexed
+                total_chunks += batch_chunks
+                files_processed += len(moved_files)
+
+                # Files in temp_dir will be auto-deleted
+                # Original files were moved, so they're gone
+                for orig_path, _ in moved_files:
+                    print(f"  ✓ Indexed and cleaned: {orig_path.name}")
+
+                print(f"  Progress: {files_processed}/{len(book_files)} files")
+
+            except Exception as e:
+                print(f"  Error indexing batch: {e}")
+                # Try to move files back if indexing failed
+                for orig_path, temp_file in moved_files:
+                    try:
+                        shutil.move(str(temp_file), str(orig_path))
+                    except:
+                        pass
+                continue
+
+    # Clean up empty directories
+    for dir_path in sorted(books_path.rglob("*"), reverse=True):
+        if dir_path.is_dir() and not any(dir_path.iterdir()):
+            try:
+                dir_path.rmdir()
+            except:
+                pass
+
+    return total_indexed, total_chunks
+
+
 def _cleanup_source_files(books_dir: str, keep_books: bool = False):
     """
     Clean up downloaded source files after indexing.
@@ -328,6 +435,14 @@ def run_index_pipeline(
             if indexed_count % 100 == 0:
                 print(f"Indexed {indexed_count} chunks...")
 
+            # Delete source file immediately after indexing (dynamic cleanup)
+            if not keep_books and local_path and Path(local_path).exists():
+                try:
+                    Path(local_path).unlink()
+                    print(f"  Cleaned up: {Path(local_path).name}")
+                except Exception as e:
+                    print(f"  Warning: Could not delete {local_path}: {e}")
+
         print(
             f"NRT indexing complete: {indexed_count} chunks from {len(new_books)} books"
         )
@@ -343,16 +458,31 @@ def run_index_pipeline(
 
         stopwords = list(load_stopwords())
 
-        print(f"Indexing files from {books_dir}...")
-        indexed, total_chunks = index_corpus_file(
-            books_dir,
-            index_dir,
-            chunks_dir,
-            stopwords,
-            chunk_size,
-            chunk_overlap,
-            batch_size,
-        )
+        # Stream files and delete after indexing to save disk space
+        if not keep_books:
+            print(
+                f"Indexing with streaming cleanup (source files deleted after indexing)..."
+            )
+            indexed, total_chunks = _index_with_streaming_cleanup(
+                books_dir,
+                index_dir,
+                chunks_dir,
+                stopwords,
+                chunk_size,
+                chunk_overlap,
+                batch_size,
+            )
+        else:
+            print(f"Indexing files from {books_dir}...")
+            indexed, total_chunks = index_corpus_file(
+                books_dir,
+                index_dir,
+                chunks_dir,
+                stopwords,
+                chunk_size,
+                chunk_overlap,
+                batch_size,
+            )
 
         print(f"Batch indexing complete: {indexed} books, {total_chunks} chunks")
 
@@ -360,6 +490,8 @@ def run_index_pipeline(
         if not keep_books and not light_mode:
             print(f"\nCleaning up source files (keep_books=False)...")
             _cleanup_source_files(books_dir, keep_books)
+        elif keep_books:
+            print(f"  Keeping source files (--keep-books)")
 
         return indexed
 
