@@ -177,6 +177,50 @@ async def list_providers():
     return {"providers": providers}
 
 
+@app.get("/books")
+async def list_books(
+    limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    source: Optional[str] = Query(
+        None, description="Filter by provider (e.g., gutenberg, openlibrary, pportal)"
+    ),
+):
+    """
+    Get all books with pagination.
+
+    Returns a list of all books in the database, optionally filtered by source.
+    Use pagination parameters to navigate through results.
+    """
+    if database is None:
+        raise HTTPException(status_code=500, detail="Database not initialized")
+
+    books = []
+    if source:
+        books = database.get_books_by_source(source, limit=limit, offset=offset)
+    else:
+        # Get books from all sources
+        all_books = []
+        for src in ["gutenberg", "openlibrary", "pportal", "internetarchive"]:
+            src_books = database.get_books_by_source(src, limit=limit * 2)
+            all_books.extend(src_books)
+        books = all_books[offset : offset + limit]
+
+    # Convert to API format
+    results = []
+    for book in books:
+        results.append(_build_search_result(book, 1.0))
+
+    return {
+        "results": results,
+        "meta": {
+            "total": len(results),
+            "limit": limit,
+            "offset": offset,
+            "source": source,
+        },
+    }
+
+
 @app.get("/search")
 async def search_books(
     query: str = Query(..., min_length=1, max_length=1000),
