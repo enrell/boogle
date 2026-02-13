@@ -135,20 +135,6 @@ export default function Search() {
     }
   }, [previewId]);
 
-  // Image Pre-loading Effect - use enhanced covers when available
-  useEffect(() => {
-    if (results.length > 0) {
-      results.forEach((book) => {
-        // Try enhanced cover first, then fall back to basic
-        const coverUrl = enhancedCovers[book.canonical_id] || getCoverUrl(book);
-        if (coverUrl) {
-          const proxyUrl = `/api/image-proxy?url=${encodeURIComponent(coverUrl)}`;
-          fetch(proxyUrl, { priority: "low" } as any).catch(() => { });
-        }
-      });
-    }
-  }, [results, enhancedCovers]);
-
   const handleBookClick = (e: React.MouseEvent, bookId: string) => {
     e.preventDefault();
     setSearchParams(prev => {
