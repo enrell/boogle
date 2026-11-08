@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+@variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  
+  --color-boogle-dark: #09090b;
+  --color-boogle-dark-lighter: #18181b;
+}
+
+html,
+body {
+  @apply bg-white dark:bg-boogle-dark text-gray-900 dark:text-gray-50 transition-colors duration-300;
+}
+
