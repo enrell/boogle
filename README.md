@@ -48,6 +48,10 @@ and returns ranked results according to query relevance — just like a miniatur
 
 ---
 
+## 🖥 Frontend
+
+The web frontend (React Router) lives in [`frontend/`](frontend/). See [frontend/README.md](frontend/README.md) to run it.
+
 ## 🛠 Prerequisites
 
 - **[Rust](https://www.rust-lang.org/tools/install)** (latest stable)
